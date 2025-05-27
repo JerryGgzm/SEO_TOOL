@@ -1,57 +1,32 @@
-## 项目结构
-详见 `docs/architecture.md`
-
-## 文档
-- [API文档](docs/api.md)
-- [架构文档](docs/architecture.md)
-- [用户指南](docs/user_guide.md)
-
-# Web框架
+# Flask Web Framework
 Flask==2.3.3
-Flask-SQLAlchemy==3.0.5
-Flask-Migrate==4.0.5
 Flask-CORS==4.0.0
 
-# 数据库
+# Database Related
 SQLAlchemy==2.0.21
 psycopg2-binary==2.9.7
 
-# Twitter API
-tweepy==4.14.0
+# Data Validation
+pydantic==2.7.4
+email-validator==2.0.0
 
-# AI/ML
-openai==0.28.1
-transformers==4.33.2
-torch==2.0.1
-scikit-learn==1.3.0
-nltk==3.8.1
+# Authentication Related
+PyJWT==2.8.0
+bcrypt==4.0.1
 
-# 数据处理
-pandas==2.0.3
-numpy==1.24.3
+# OAuth Related
+requests-oauthlib==1.3.1
 requests==2.31.0
 
-# 任务调度
-celery==5.3.1
-redis==4.6.0
+# Encryption
+cryptography==41.0.7
 
-# 配置管理
-python-dotenv==1.0.0
-pydantic==2.3.0
-
-# 测试
+# Testing
 pytest==7.4.2
-pytest-cov==4.1.0
 pytest-mock==3.11.1
 
-# 开发工具
-black==23.7.0
-flake8==6.0.0
-mypy==1.5.1
+# Environment Variables
+python-dotenv==1.0.0
 
-# 日志
-loguru==0.7.0
-
-# 其他工具
-schedule==1.2.0
+# Date/Time Handling
 python-dateutil==2.8.2
