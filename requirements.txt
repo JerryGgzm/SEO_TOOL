@@ -24,6 +24,7 @@ cryptography==41.0.7
 # Testing
 pytest==7.4.2
 pytest-mock==3.11.1
+pytest-asyncio==0.21.1
 
 # Environment Variables
 python-dotenv==1.0.0
@@ -44,3 +45,26 @@ asyncio-throttle==1.0.2
 
 # Monitoring and logging
 structlog==23.1.0
+
+# Natural Language Processing
+nltk==3.8.1
+textblob==0.17.1
+vaderSentiment==3.3.2
+spacy==3.6.1
+
+# Optional: Advanced NLP models
+# python -m spacy download en_core_web_sm
+
+# Data processing and analysis
+numpy==1.24.3
+scipy==1.11.1
+scikit-learn==1.3.0
+
+# Topic modeling (optional)
+gensim==4.3.1
+
+# Async support
+aiohttp==3.8.5
+
+# OpenAI for LLM insights (optional)
+openai==1.3.0

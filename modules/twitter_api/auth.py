@@ -15,7 +15,7 @@ class TwitterAuth:
     
     def get_bearer_token(self) -> Optional[str]:
         """Get application-only bearer token (for app-only endpoints)"""
-        url = "https://api.twitter.com/oauth2/token"
+        url = 'https://api.twitter.com/oauth2/token'
         
         headers = {
             'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
@@ -40,6 +40,9 @@ class TwitterAuth:
             
         except requests.RequestException as e:
             logger.error(f"Failed to get bearer token: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response status: {e.response.status_code}")
+                logger.error(f"Response content: {e.response.text}")
             return None
     
     def validate_user_token(self, user_access_token: str) -> bool:

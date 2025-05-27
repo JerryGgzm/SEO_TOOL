@@ -9,6 +9,7 @@ Run this script to verify that the Twitter API module is properly configured.
 import sys
 import os
 import logging
+import time
 from typing import Dict, Any
 
 # Add project root to path
@@ -28,6 +29,7 @@ def check_configuration() -> Dict[str, Any]:
     
     if config_status['valid']:
         logger.info("✅ Configuration is valid")
+        logger.info(f"Client ID: {twitter_config.CLIENT_ID[:10]}..." if twitter_config.CLIENT_ID else "None")
     else:
         logger.error("❌ Configuration errors found:")
         for error in config_status['errors']:
@@ -56,11 +58,15 @@ def check_api_connectivity() -> bool:
         
         if bearer_token:
             logger.info("✅ Successfully obtained bearer token")
+            logger.info(f"Bearer token: {bearer_token[:20]}...")
             return True
         else:
             logger.error("❌ Failed to obtain bearer token")
             return False
             
+    except TwitterAPIError as e:
+        logger.error(f"❌ Twitter API error: {e}")
+        return False
     except Exception as e:
         logger.error(f"❌ API connectivity check failed: {e}")
         return False
@@ -125,11 +131,32 @@ def check_endpoints() -> bool:
         logger.error(f"❌ Endpoint configuration check failed: {e}")
         return False
 
+def setup_test_credentials():
+    """Setup test credentials using the config system"""
+    logger.info("Setting up test credentials...")
+    
+    # use config class method to set credentials
+    test_client_id = "bGoxpxrUUsUDr03gWZvn2o46z"
+    test_client_secret = "abpX9L4iqWI7jkbuMJeawqgVrKogQ973hrz9uQsOO9QsmLbB4d"
+    
+    twitter_config.set_credentials(test_client_id, test_client_secret)
+    
+    # verify setup
+    status = twitter_config.get_credentials_status()
+    logger.info(f"credentials status: {status}")
+    
+    return status['client_id_set'] and status['client_secret_set']
+
 def run_full_health_check() -> bool:
     """Run complete health check"""
     logger.info("=" * 50)
     logger.info("Twitter API Module Health Check")
     logger.info("=" * 50)
+    
+    # Setup credentials first
+    if not setup_test_credentials():
+        logger.error("❌ Please setup valid Twitter API v2 credentials first")
+        return False
     
     checks = [
         ("Configuration", check_configuration),
@@ -168,11 +195,14 @@ def run_full_health_check() -> bool:
         logger.info("\n🎉 All health checks passed! Twitter API module is ready.")
     else:
         logger.error("\n💥 Some health checks failed. Please review the errors above.")
+        logger.info("\nTroubleshooting tips:")
+        logger.info("1. Ensure you have valid Twitter API v2 credentials")
+        logger.info("2. Check that your Twitter Developer account is approved")
+        logger.info("3. Verify your app has the necessary permissions")
+        logger.info("4. Make sure you're using OAuth 2.0 Client ID/Secret, not v1.1 tokens")
     
     return all_passed
 
 if __name__ == "__main__":
-    import time
-    
     success = run_full_health_check()
     sys.exit(0 if success else 1)

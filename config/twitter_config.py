@@ -1,5 +1,5 @@
 import os
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 class TwitterConfig:
     """Twitter API configuration settings"""
@@ -84,6 +84,26 @@ class TwitterConfig:
             'recommended_results': cls.DEFAULT_SEARCH_RESULTS,
             'max_query_length': 1024,  # Twitter API limit
             'max_operators': 50  # Practical limit for complex queries
+        }
+    
+    @classmethod
+    def set_credentials(cls, client_id: str, client_secret: str):
+        """set credentials"""
+        os.environ['TWITTER_CLIENT_ID'] = client_id
+        os.environ['TWITTER_CLIENT_SECRET'] = client_secret
+        # reload config
+        cls.CLIENT_ID = client_id
+        cls.CLIENT_SECRET = client_secret
+    
+    
+    @classmethod
+    def get_credentials_status(cls) -> Dict[str, Any]:
+        """get credentials status"""
+        return {
+            'client_id_set': bool(cls.CLIENT_ID),
+            'client_secret_set': bool(cls.CLIENT_SECRET),
+            'client_id_length': len(cls.CLIENT_ID) if cls.CLIENT_ID else 0,
+            'client_secret_length': len(cls.CLIENT_SECRET) if cls.CLIENT_SECRET else 0
         }
 
 # Configuration instance
