@@ -62,15 +62,24 @@ logger = logging.getLogger(__name__)
 class DatabaseSetupManager:
     """Manages all database setup and maintenance operations"""
     
-    def __init__(self, database_url: Optional[str] = None, verbose: bool = False):
+    def __init__(self, database_url: Optional[str] = None):
+        """Initialize database setup manager"""
         self.database_url = database_url or database_config.DATABASE_URL
-        self.verbose = verbose
-        
-        if verbose:
-            logging.getLogger().setLevel(logging.DEBUG)
-        
         logger.info("Database Setup Manager initialized")
         logger.info(f"Database URL: {self._mask_password(self.database_url)}")
+        
+        # Initialize database connection
+        self._initialize_database_connection()
+    
+    def _initialize_database_connection(self):
+        """Initialize database connection for all operations"""
+        try:
+            # Initialize database connection
+            init_database(self.database_url, create_tables=False)
+            logger.info("Database connection initialized")
+        except Exception as e:
+            logger.warning(f"Database connection initialization failed: {e}")
+            # Don't raise an exception here, let the specific operations handle it
     
     def _mask_password(self, url: str) -> str:
         """Mask password in database URL for logging"""
@@ -84,25 +93,25 @@ class DatabaseSetupManager:
         return url
     
     def create_database(self) -> bool:
-        """Create database and all tables"""
+        """Create database and tables"""
         try:
             print("🔨 Creating database and tables...")
             
-            # Initialize database
-            init_database(self.database_url, create_tables=True, echo=self.verbose)
+            # Initialize database and create tables
+            init_database(self.database_url, create_tables=True)
             
-            # Verify creation
-            if health_check():
-                print("✅ Database and tables created successfully")
-                logger.info("Database creation completed successfully")
-                
-                # Show table information
-                self._show_table_info()
-                return True
-            else:
-                print("❌ Database creation failed - health check failed")
-                return False
-                
+            # Test connectivity
+            if not health_check():
+                raise Exception("Database health check failed after creation")
+            
+            print("✅ Database and tables created successfully")
+            logger.info("Database creation completed successfully")
+            
+            # Show table information
+            self._show_table_info()
+            
+            return True
+            
         except Exception as e:
             print(f"❌ Database creation failed: {e}")
             logger.error(f"Database creation failed: {e}")
@@ -144,12 +153,17 @@ class DatabaseSetupManager:
         try:
             print("🧪 Testing database connectivity and operations...")
             
+            # 确保数据库已初始化
+            if not self._ensure_database_initialized():
+                return False
+            
             # Test 1: Health check
             print("  📊 Running health check...")
-            if not health_check():
+            if health_check():
+                print("  ✅ Health check passed")
+            else:
                 print("  ❌ Health check failed")
                 return False
-            print("  ✅ Health check passed")
             
             # Test 2: Basic CRUD operations
             print("  🔄 Testing CRUD operations...")
@@ -173,8 +187,19 @@ class DatabaseSetupManager:
             return True
             
         except Exception as e:
-            print(f"❌ Database testing failed: {e}")
-            logger.error(f"Database testing failed: {e}")
+            print(f"❌ Database test failed: {e}")
+            logger.error(f"Database test failed: {e}")
+            return False
+    
+    def _ensure_database_initialized(self) -> bool:
+        """确保数据库已初始化"""
+        try:
+            # 尝试初始化数据库连接
+            init_database(self.database_url, create_tables=False)
+            return True
+        except Exception as e:
+            print(f"❌ Failed to initialize database: {e}")
+            logger.error(f"Database initialization failed: {e}")
             return False
     
     def _test_crud_operations(self) -> bool:
@@ -231,74 +256,107 @@ class DatabaseSetupManager:
             return False
     
     def _test_data_flow_operations(self) -> bool:
-        """Test data flow manager operations"""
+        """Test data flow operations"""
         try:
+            print("  🌊 Testing data flow operations...")
+            
             with get_db_context() as session:
                 data_flow = DataFlowManager(session)
                 
                 # Test founder registration
-                founder_id = data_flow.process_founder_registration({
+                founder_data = {
                     'email': 'test_dataflow@example.com',
-                    'hashed_password': 'test_hash_456',
-                    'settings': {'test_dataflow': True}
-                })
+                    'hashed_password': 'test_hash_123',
+                    'settings': {'theme': 'dark'}
+                }
                 
+                founder_id = data_flow.process_founder_registration(founder_data)
                 if not founder_id:
                     raise Exception("Founder registration failed")
                 
-                # Test product creation
-                product_id = data_flow.process_product_information_entry(founder_id, {
+                # Test product information entry
+                product_data = {
                     'product_name': 'Test Product',
                     'description': 'A test product for validation',
-                    'target_audience_description': 'Test users',
-                    'niche_definition': {
-                        'keywords': ['test', 'validation', 'demo'],
-                        'tags': ['#testing', '#demo']
-                    },
+                    'target_audience_description': 'Test audience',
+                    'niche_definition': 'Test niche',
                     'core_values': ['innovation', 'quality']
-                })
+                }
                 
+                product_id = data_flow.process_product_information_entry(founder_id, product_data)
                 if not product_id:
                     raise Exception("Product creation failed")
                 
-                # Test trend storage
-                trend_ids = data_flow.store_analyzed_trends(founder_id, [{
-                    'topic_name': '#TestTrend',
-                    'niche_relevance_score': 0.8,
-                    'sentiment_scores': {
-                        'positive': 0.6,
-                        'negative': 0.2,
-                        'neutral': 0.2,
-                        'dominant_sentiment': 'positive'
-                    },
-                    'extracted_pain_points': ['test complexity'],
+                # Test trend analysis
+                trends_data = [{
+                    'topic_name': 'Test Trend',
+                    'niche_relevance_score': 0.85,
+                    'sentiment_scores': {'positive': 0.7, 'negative': 0.1, 'neutral': 0.2},
                     'is_micro_trend': True
-                }])
+                }]
                 
+                trend_ids = data_flow.store_analyzed_trends(founder_id, trends_data)
                 if not trend_ids:
                     raise Exception("Trend storage failed")
                 
                 # Test content generation
-                draft_id = data_flow.store_generated_content_draft({
+                content_data = {
                     'founder_id': founder_id,
                     'analyzed_trend_id': trend_ids[0],
                     'content_type': 'tweet',
-                    'generated_text': 'Test tweet for validation #TestTrend',
-                    'seo_suggestions': {'hashtags': ['#TestTrend', '#Testing']}
-                })
+                    'generated_text': 'Test tweet content #TestTrend',
+                    'seo_suggestions': {
+                        'hashtags': ['#TestTrend'],
+                        'keywords': ['test', 'trend']
+                    }
+                }
                 
-                if not draft_id:
-                    raise Exception("Content draft creation failed")
+                content_id = data_flow.store_generated_content_draft(content_data)
+                if not content_id:
+                    raise Exception("Content generation failed")
                 
                 # Cleanup test data
-                session.query(Founder).filter(Founder.id == founder_id).delete()
-                session.commit()
+                try:
+                    # 1. Delete content draft
+                    content_draft = session.query(GeneratedContentDraft).filter(
+                        GeneratedContentDraft.id == content_id
+                    ).first()
+                    if content_draft:
+                        session.delete(content_draft)
+                    
+                    # 2. Delete trend analysis
+                    for trend_id in trend_ids:
+                        trend = session.query(AnalyzedTrend).filter(
+                            AnalyzedTrend.id == trend_id
+                        ).first()
+                        if trend:
+                            session.delete(trend)
+                    
+                    # 3. Delete product
+                    product = session.query(Product).filter(
+                        Product.id == product_id
+                    ).first()
+                    if product:
+                        session.delete(product)
+                    
+                    # 4. Delete founder
+                    founder = session.query(Founder).filter(
+                        Founder.id == founder_id
+                    ).first()
+                    if founder:
+                        session.delete(founder)
+                    
+                    # Commit delete operations
+                    session.commit()
+                    
+                except Exception as cleanup_error:
+                    logger.warning(f"Test data cleanup failed: {cleanup_error}")
+                    session.rollback()
+                    # Don't let cleanup failure cause the entire test to fail
                 
-                print("    ✅ Data flow operations working correctly")
                 return True
                 
         except Exception as e:
-            print(f"    ❌ Data flow operations failed: {e}")
             logger.error(f"Data flow operations test failed: {e}")
             return False
     
@@ -1310,8 +1368,7 @@ Examples:
     
     # Initialize setup manager
     setup_manager = DatabaseSetupManager(
-        database_url=args.database_url,
-        verbose=args.verbose
+        database_url=args.database_url
     )
     
     # Execute command

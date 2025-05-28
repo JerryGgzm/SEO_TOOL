@@ -6,7 +6,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, Session
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID, JSONB
 from sqlalchemy.sql import func
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Optional, List, Dict, Any
 import uuid
 import json

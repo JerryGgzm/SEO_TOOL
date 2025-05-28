@@ -1,0 +1,81 @@
+2025-05-28 14:30:16,902 - INFO - Database Setup Manager initialized
+2025-05-28 14:30:16,903 - INFO - Database URL: postgresql://postgres@localhost:5432/ideation_db
+2025-05-28 14:30:16,903 - ERROR - Database creation failed: init_database() got an unexpected keyword argument 'echo'
+2025-05-28 14:31:22,487 - INFO - Database Setup Manager initialized
+2025-05-28 14:31:22,488 - INFO - Database URL: postgresql://postgres@localhost:5432/ideation_db
+2025-05-28 14:31:26,638 - ERROR - Database creation failed: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: Connection refused (0x0000274D/10061)
+	Is the server running on that host and accepting TCP/IP connections?
+connection to server at "localhost" (127.0.0.1), port 5432 failed: Connection refused (0x0000274D/10061)
+	Is the server running on that host and accepting TCP/IP connections?
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-05-28 15:49:37,903 - INFO - Database Setup Manager initialized
+2025-05-28 15:49:37,904 - INFO - Database URL: sqlite:///./ideation_db.sqlite
+2025-05-28 15:57:23,060 - INFO - Database Setup Manager initialized
+2025-05-28 15:57:23,061 - INFO - Database URL: postgresql://postgres:****@localhost:5432/ideation_db
+2025-05-28 15:57:23,167 - ERROR - Database creation failed: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-05-28 16:28:05,772 - INFO - Database Setup Manager initialized
+2025-05-28 16:28:05,772 - INFO - Database URL: postgresql://postgres-ideation:****@localhost:5432/ideation_db
+2025-05-28 16:28:05,812 - ERROR - Database creation failed: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: FATAL:  password authentication failed for user "postgres-ideation"
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-05-28 16:28:47,178 - INFO - Database Setup Manager initialized
+2025-05-28 16:28:47,178 - INFO - Database URL: postgresql://postgres:****@localhost:5432/ideation_db
+2025-05-28 16:37:53,340 - INFO - Database Setup Manager initialized
+2025-05-28 16:37:53,340 - INFO - Database URL: postgresql://postgres:****@localhost:5432/ideation_db
+2025-05-28 16:38:05,546 - INFO - Database Setup Manager initialized
+2025-05-28 16:38:05,546 - INFO - Database URL: postgresql://postgres:****@localhost:5432/ideation_db
+2025-05-28 16:38:38,108 - INFO - Database Setup Manager initialized
+2025-05-28 16:38:38,108 - INFO - Database URL: postgresql://postgres:****@localhost:5432/ideation_db
+2025-05-28 16:47:58,924 - INFO - Database Setup Manager initialized
+2025-05-28 16:47:58,925 - INFO - Database URL: postgresql://postgres:****@localhost:5432/ideation_db
+2025-05-28 16:48:47,617 - INFO - Database Setup Manager initialized
+2025-05-28 16:48:47,617 - INFO - Database URL: postgresql://postgres:****@localhost:5432/ideation_db
+2025-05-28 16:53:14,104 - INFO - Database Setup Manager initialized
+2025-05-28 16:53:14,104 - INFO - Database URL: postgresql://postgres:****@localhost:5432/ideation_db
+2025-05-28 16:53:14,157 - INFO - Database creation completed successfully
+2025-05-28 16:53:33,795 - INFO - Database Setup Manager initialized
+2025-05-28 16:53:33,795 - INFO - Database URL: postgresql://postgres:****@localhost:5432/ideation_db
+2025-05-28 16:55:08,230 - INFO - Database Setup Manager initialized
+2025-05-28 16:55:08,231 - INFO - Database URL: postgresql://postgres:****@localhost:5432/ideation_db
+2025-05-28 16:55:08,285 - INFO - Database creation completed successfully
+2025-05-28 16:57:49,648 - INFO - Database Setup Manager initialized
+2025-05-28 16:57:49,648 - INFO - Database URL: postgresql://postgres:****@localhost:5432/ideation_db
+2025-05-28 17:11:08,564 - INFO - Database Setup Manager initialized
+2025-05-28 17:11:08,565 - INFO - Database URL: postgresql://postgres:****@localhost:5432/ideation_db
+2025-05-28 17:11:08,578 - INFO - Database connection initialized
+2025-05-28 17:11:08,691 - INFO - Founder registered successfully: test_dataflow@example.com
+2025-05-28 17:11:08,702 - INFO - Product information saved for founder 7e7af35b-ed46-4b86-9750-dd4963d06ab8
+2025-05-28 17:11:08,710 - INFO - Stored 1 analyzed trends for founder 7e7af35b-ed46-4b86-9750-dd4963d06ab8
+2025-05-28 17:11:08,719 - INFO - Content draft created: 963d7e21-f629-478e-a8c0-a5fb77d54bf5
+2025-05-28 17:11:08,722 - ERROR - Data flow operations test failed: (psycopg2.errors.ForeignKeyViolation) update or delete on table "founders" violates foreign key constraint "products_founder_id_fkey" on table "products"
+DETAIL:  Key (id)=(7e7af35b-ed46-4b86-9750-dd4963d06ab8) is still referenced from table "products".
+
+[SQL: DELETE FROM founders WHERE founders.id = %(id_1)s::UUID]
+[parameters: {'id_1': '7e7af35b-ed46-4b86-9750-dd4963d06ab8'}]
+(Background on this error at: https://sqlalche.me/e/20/gkpj)
+2025-05-28 17:13:50,463 - INFO - Database Setup Manager initialized
+2025-05-28 17:13:50,463 - INFO - Database URL: postgresql://postgres:****@localhost:5432/ideation_db
+2025-05-28 17:13:50,475 - INFO - Database connection initialized
+2025-05-28 17:13:50,571 - WARNING - Registration failed: Email already exists: test_dataflow@example.com
+2025-05-28 17:13:50,572 - ERROR - Data flow operations test failed: Founder registration failed
+2025-05-28 17:14:00,654 - INFO - Database Setup Manager initialized
+2025-05-28 17:14:00,655 - INFO - Database URL: postgresql://postgres:****@localhost:5432/ideation_db
+2025-05-28 17:14:00,670 - INFO - Database connection initialized
+2025-05-28 17:14:00,737 - INFO - Founder registered successfully: demo@ideation.com
+2025-05-28 17:14:00,748 - INFO - Product information saved for founder 1441de20-8be3-4070-b742-047b1524652f
+2025-05-28 17:14:00,764 - INFO - Stored 2 analyzed trends for founder 1441de20-8be3-4070-b742-047b1524652f
+2025-05-28 17:14:00,776 - INFO - Content draft created: de200eb5-da6c-48d5-9a3f-f014c171a1c6
+2025-05-28 17:14:00,783 - INFO - Content draft created: 2e356daa-e33b-4c28-9c2d-0391a3e33a0b
+2025-05-28 17:14:00,792 - INFO - Content review processed: de200eb5-da6c-48d5-9a3f-f014c171a1c6 -> approved
+2025-05-28 17:14:00,799 - INFO - Content review processed: 2e356daa-e33b-4c28-9c2d-0391a3e33a0b -> edited
+2025-05-28 17:14:00,819 - INFO - Publication recorded: draft de200eb5-da6c-48d5-9a3f-f014c171a1c6 -> tweet demo_tweet_1234567890
+2025-05-28 17:14:00,834 - INFO - Publication recorded: draft 2e356daa-e33b-4c28-9c2d-0391a3e33a0b -> tweet demo_tweet_0987654321
+2025-05-28 17:14:00,842 - INFO - Analytics stored for tweet demo_tweet_1234567890
+2025-05-28 17:14:00,848 - INFO - Analytics stored for tweet demo_tweet_0987654321
+2025-05-28 17:14:00,937 - INFO - Demo data cleaned up successfully
+2025-05-28 17:14:10,435 - INFO - Database Setup Manager initialized
+2025-05-28 17:14:10,436 - INFO - Database URL: postgresql://postgres:****@localhost:5432/ideation_db
+2025-05-28 17:14:10,448 - INFO - Database connection initialized

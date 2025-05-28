@@ -7,7 +7,7 @@ It handles connection parameters, pooling settings, and environment-specific con
 
 import os
 from typing import Dict, Any, List, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urlparse, quote_plus
 import logging
 
 logger = logging.getLogger(__name__)
@@ -16,13 +16,15 @@ class DatabaseConfig:
     """Database configuration class with validation and environment support"""
     
     def __init__(self):
-        # Core database connection parameters
-        self.DATABASE_URL = self._get_database_url()
+        # First set all basic attributes
         self.DATABASE_HOST = os.getenv('DATABASE_HOST', 'localhost')
         self.DATABASE_PORT = int(os.getenv('DATABASE_PORT', '5432'))
         self.DATABASE_NAME = os.getenv('DATABASE_NAME', 'ideation_db')
         self.DATABASE_USER = os.getenv('DATABASE_USER', 'postgres')
-        self.DATABASE_PASSWORD = os.getenv('DATABASE_PASSWORD', '')
+        self.DATABASE_PASSWORD = os.getenv('DATABASE_PASSWORD', 'Tianjin@0430')  # Replace with your password
+        
+        # Build DATABASE_URL (now all required attributes are defined)
+        self.DATABASE_URL = self._get_database_url()
         
         # Connection pool settings
         self.POOL_SIZE = int(os.getenv('DATABASE_POOL_SIZE', '10'))
@@ -61,22 +63,9 @@ class DatabaseConfig:
         
     def _get_database_url(self) -> str:
         """Build database URL from environment variables"""
-        # Check if full DATABASE_URL is provided
-        database_url = os.getenv('DATABASE_URL')
-        if database_url:
-            return database_url
-        
-        # Build URL from individual components
-        host = os.getenv('DATABASE_HOST', 'localhost')
-        port = os.getenv('DATABASE_PORT', '5432')
-        name = os.getenv('DATABASE_NAME', 'ideation_db')
-        user = os.getenv('DATABASE_USER', 'postgres')
-        password = os.getenv('DATABASE_PASSWORD', '')
-        
-        if password:
-            return f"postgresql://{user}:{password}@{host}:{port}/{name}"
-        else:
-            return f"postgresql://{user}@{host}:{port}/{name}"
+        # URL 编码密码以处理特殊字符
+        encoded_password = quote_plus(self.DATABASE_PASSWORD)
+        return f"postgresql://{self.DATABASE_USER}:{encoded_password}@{self.DATABASE_HOST}:{self.DATABASE_PORT}/{self.DATABASE_NAME}"
     
     def get_connection_params(self) -> Dict[str, Any]:
         """Get SQLAlchemy connection parameters"""
