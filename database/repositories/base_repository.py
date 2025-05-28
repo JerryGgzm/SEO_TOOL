@@ -1,11 +1,13 @@
 from abc import ABC, abstractmethod
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.declarative import declarative_base
 from typing import Optional, List, Dict, Any, Type, TypeVar
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 import logging
 
 logger = logging.getLogger(__name__)
 
+Base = declarative_base()
 T = TypeVar('T', bound=Base)
 
 class BaseRepository(ABC):

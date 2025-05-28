@@ -4,14 +4,75 @@ from sqlalchemy import (
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, Session
-from sqlalchemy.dialects.postgresql import UUID, JSONB, BYTEA
+from sqlalchemy.dialects.postgresql import UUID as PostgresUUID, JSONB
 from sqlalchemy.sql import func
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 import uuid
 import json
+from sqlalchemy.types import TypeDecorator, CHAR
 
 Base = declarative_base()
+
+class UUID(TypeDecorator):
+    """Create a UUID type for SQLite for compatibility with PostgreSQL in tests"""
+    impl = CHAR
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == 'postgresql':
+            return dialect.type_descriptor(PostgresUUID())
+        else:
+            return dialect.type_descriptor(CHAR(36))
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return value
+        elif dialect.name == 'postgresql':
+            return str(value)
+        else:
+            if not isinstance(value, uuid.UUID):
+                return str(uuid.UUID(value)) if value else None
+            else:
+                return str(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return value
+        else:
+            if not isinstance(value, uuid.UUID):
+                return uuid.UUID(value)
+            return value
+
+class JSONType(TypeDecorator):
+    """Create a JSON type for SQLite for compatibility with PostgreSQL in tests"""
+    impl = Text
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == 'postgresql':
+            return dialect.type_descriptor(JSONB())
+        else:
+            return dialect.type_descriptor(Text())
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return value
+        if dialect.name == 'postgresql':
+            return value
+        else:
+            return json.dumps(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return value
+        if dialect.name == 'postgresql':
+            return value
+        else:
+            try:
+                return json.loads(value)
+            except (ValueError, TypeError):
+                return value
 
 # ====================
 # Core User and Product Models
@@ -21,12 +82,12 @@ class Founder(Base):
     """Founders table - stores startup founder information"""
     __tablename__ = 'founders'
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(UUID(), primary_key=True, default=uuid.uuid4, nullable=False)
     email = Column(String(255), unique=True, nullable=False, index=True)
     hashed_password = Column(String(255), nullable=False)
-    created_at = Column(TIMESTAMP(timezone=True), default=func.now())
-    updated_at = Column(TIMESTAMP(timezone=True), default=func.now(), onupdate=func.now())
-    settings = Column(JSONB, default=dict, comment="User interface preferences, notification settings")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    settings = Column(JSONType, default=dict, comment="User interface preferences, notification settings")
     
     # Relationships
     products = relationship("Product", back_populates="founder", cascade="all, delete-orphan")
@@ -45,17 +106,17 @@ class Product(Base):
     """Products table - stores product information and niche definitions"""
     __tablename__ = 'products'
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    founder_id = Column(UUID(as_uuid=True), ForeignKey('founders.id'), nullable=False, index=True)
+    id = Column(UUID(), primary_key=True, default=uuid.uuid4, nullable=False)
+    founder_id = Column(UUID(), ForeignKey('founders.id'), nullable=False, index=True)
     product_name = Column(String(200), nullable=False)
     description = Column(Text, nullable=False)
     core_values = Column(Text, comment="JSON array of core values")
     target_audience_description = Column(Text, nullable=False)
-    niche_definition = Column(JSONB, nullable=False, comment="Keywords, tags, exclusion terms")
+    niche_definition = Column(JSONType, nullable=False, comment="Keywords, tags, exclusion terms")
     seo_keywords = Column(Text, comment="SEO-specific keywords")
     website_url = Column(String(500))
-    created_at = Column(TIMESTAMP(timezone=True), default=func.now())
-    updated_at = Column(TIMESTAMP(timezone=True), default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
     founder = relationship("Founder", back_populates="products")
@@ -86,7 +147,7 @@ class TwitterCredential(Base):
     """Twitter credentials table - stores encrypted OAuth tokens"""
     __tablename__ = 'twitter_credentials'
     
-    founder_id = Column(UUID(as_uuid=True), ForeignKey('founders.id'), primary_key=True)
+    founder_id = Column(UUID(), ForeignKey('founders.id'), primary_key=True)
     twitter_user_id = Column(String(50), nullable=False, index=True, comment="Twitter numeric user ID")
     screen_name = Column(String(50), nullable=False, comment="Twitter username")
     encrypted_access_token = Column(Text, nullable=False, comment="AES encrypted access token")
@@ -130,21 +191,21 @@ class AnalyzedTrend(Base):
     """Analyzed trends table - stores comprehensive trend analysis results"""
     __tablename__ = 'analyzed_trends'
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    founder_id = Column(UUID(as_uuid=True), ForeignKey('founders.id'), nullable=False, index=True)
+    id = Column(UUID(), primary_key=True, default=uuid.uuid4, nullable=False)
+    founder_id = Column(UUID(), ForeignKey('founders.id'), nullable=False, index=True)
     trend_source_id = Column(String(100), comment="Original Twitter trend ID")
     topic_name = Column(String(200), nullable=False, index=True)
-    analyzed_at = Column(TIMESTAMP(timezone=True), default=func.now())
+    analyzed_at = Column(DateTime, default=datetime.utcnow)
     niche_relevance_score = Column(Float, nullable=False, comment="0.0 to 1.0 relevance score")
-    sentiment_scores = Column(JSONB, nullable=False, comment="SentimentBreakdown structure")
+    sentiment_scores = Column(JSONType, nullable=False, comment="SentimentBreakdown structure")
     extracted_pain_points = Column(Text, comment="JSON array of pain points")
     common_questions = Column(Text, comment="JSON array of common questions")
     discussion_focus_points = Column(Text, comment="JSON array of discussion themes")
     is_micro_trend = Column(Boolean, default=False, index=True)
     trend_velocity_score = Column(Float, comment="Growth velocity score")
     trend_potential_score = Column(Float, comment="Overall potential score")
-    example_tweets_json = Column(JSONB, comment="Sample representative tweets")
-    expires_at = Column(TIMESTAMP(timezone=True), comment="When analysis becomes stale")
+    example_tweets_json = Column(JSONType, comment="Sample representative tweets")
+    expires_at = Column(DateTime, comment="When analysis becomes stale")
     
     # Relationships
     founder = relationship("Founder", back_populates="analyzed_trends")
@@ -198,19 +259,19 @@ class GeneratedContentDraft(Base):
     """Generated content drafts table - stores AI-generated content for review"""
     __tablename__ = 'generated_content_drafts'
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    founder_id = Column(UUID(as_uuid=True), ForeignKey('founders.id'), nullable=False, index=True)
-    analyzed_trend_id = Column(UUID(as_uuid=True), ForeignKey('analyzed_trends.id'), index=True)
+    id = Column(UUID(), primary_key=True, default=uuid.uuid4, nullable=False)
+    founder_id = Column(UUID(), ForeignKey('founders.id'), nullable=False, index=True)
+    analyzed_trend_id = Column(UUID(), ForeignKey('analyzed_trends.id'), index=True)
     source_tweet_id_for_reply = Column(String(50), comment="Original tweet ID if this is a reply")
     content_type = Column(String(20), nullable=False, comment="tweet, reply, quote_tweet")
     generated_text = Column(Text, nullable=False, comment="AI-generated original text")
-    seo_suggestions = Column(JSONB, comment="SEO keywords and hashtag suggestions")
+    seo_suggestions = Column(JSONType, comment="SEO keywords and hashtag suggestions")
     edited_text = Column(Text, comment="Founder-edited version")
     status = Column(String(20), nullable=False, default='pending_review', index=True,
                    comment="pending_review, approved, rejected, scheduled, posted, error")
-    ai_generation_metadata = Column(JSONB, comment="AI reasoning for content generation")
-    created_at = Column(TIMESTAMP(timezone=True), default=func.now())
-    scheduled_post_time = Column(TIMESTAMP(timezone=True), comment="When to post if scheduled")
+    ai_generation_metadata = Column(JSONType, comment="AI reasoning for content generation")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    scheduled_post_time = Column(DateTime, comment="When to post if scheduled")
     posted_tweet_id = Column(String(50), index=True, comment="Twitter ID after posting")
     
     # Relationships
@@ -255,14 +316,14 @@ class AutomationRule(Base):
     """Automation rules table - stores user-defined automation rules"""
     __tablename__ = 'automation_rules'
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    founder_id = Column(UUID(as_uuid=True), ForeignKey('founders.id'), nullable=False, index=True)
+    id = Column(UUID(), primary_key=True, default=uuid.uuid4, nullable=False)
+    founder_id = Column(UUID(), ForeignKey('founders.id'), nullable=False, index=True)
     rule_name = Column(String(100), nullable=False)
-    trigger_conditions = Column(JSONB, nullable=False, comment="Conditions that trigger this rule")
-    action_to_take = Column(JSONB, nullable=False, comment="Actions to execute when triggered")
+    trigger_conditions = Column(JSONType, nullable=False, comment="Conditions that trigger this rule")
+    action_to_take = Column(JSONType, nullable=False, comment="Actions to execute when triggered")
     is_active = Column(Boolean, default=True, index=True)
-    created_at = Column(TIMESTAMP(timezone=True), default=func.now())
-    last_triggered_at = Column(TIMESTAMP(timezone=True), comment="When rule was last executed")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_triggered_at = Column(DateTime, comment="When rule was last executed")
     trigger_count = Column(Integer, default=0, comment="Number of times rule has been triggered")
     
     # Relationships
@@ -284,8 +345,8 @@ class PostAnalytic(Base):
     __tablename__ = 'post_analytics'
     
     posted_tweet_id = Column(String(50), primary_key=True, comment="Twitter tweet ID")
-    founder_id = Column(UUID(as_uuid=True), ForeignKey('founders.id'), nullable=False, index=True)
-    content_draft_id = Column(UUID(as_uuid=True), ForeignKey('generated_content_drafts.id'), index=True)
+    founder_id = Column(UUID(), ForeignKey('founders.id'), nullable=False, index=True)
+    content_draft_id = Column(UUID(), ForeignKey('generated_content_drafts.id'), index=True)
     impressions = Column(Integer, default=0, comment="Number of times tweet was viewed")
     likes = Column(Integer, default=0)
     retweets = Column(Integer, default=0)

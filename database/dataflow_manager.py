@@ -1,15 +1,15 @@
 from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 import logging
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, func
+from sqlalchemy import and_, or_
+from sqlalchemy.sql import func
 import json
 
 from .repositories import (
     FounderRepository, ProductRepository, TrendRepository, 
-    ContentRepository, AnalyticsRepository
+    ContentRepository, AnalyticsRepository, AutomationRepository
 )
-from .repositories.automation_repository import AutomationRepository
 from .models import *
 
 logger = logging.getLogger(__name__)
@@ -149,8 +149,8 @@ class DataFlowManager:
                 existing.encrypted_access_token = credentials_data['encrypted_access_token']
                 existing.encrypted_refresh_token = credentials_data.get('encrypted_refresh_token')
                 existing.token_expires_at = credentials_data.get('token_expires_at')
-                existing.last_validated_at = datetime.utcnow()
-                existing.updated_at = datetime.utcnow()
+                existing.last_validated_at = datetime.now(UTC)
+                existing.updated_at = datetime.now(UTC)
                 
                 self.db_session.commit()
                 logger.info(f"Twitter credentials updated for founder {founder_id}")
@@ -401,7 +401,7 @@ class DataFlowManager:
             # Get recent content for context (avoid repetition)
             recent_content = self.db_session.query(GeneratedContentDraft).filter(
                 GeneratedContentDraft.founder_id == founder_id,
-                GeneratedContentDraft.created_at >= datetime.utcnow() - timedelta(days=7)
+                GeneratedContentDraft.created_at >= datetime.now(UTC) - timedelta(days=7)
             ).order_by(GeneratedContentDraft.created_at.desc()).limit(10).all()
             
             # Get content performance insights
@@ -575,7 +575,7 @@ class DataFlowManager:
             # Get scheduled content (due for posting)
             scheduled_content = self.db_session.query(GeneratedContentDraft).filter(
                 GeneratedContentDraft.status == 'scheduled',
-                GeneratedContentDraft.scheduled_post_time <= datetime.utcnow()
+                GeneratedContentDraft.scheduled_post_time <= datetime.now(UTC)
             ).limit(limit // 2).all()
             
             all_content = approved_content + scheduled_content
@@ -632,7 +632,7 @@ class DataFlowManager:
                         posted_tweet_id=posted_tweet_id,
                         founder_id=draft.founder_id,
                         content_draft_id=draft_id,
-                        posted_at=posted_at or datetime.utcnow()
+                        posted_at=posted_at or datetime.now(UTC)
                     )
                     
                     self.db_session.add(initial_analytics)
@@ -657,7 +657,7 @@ class DataFlowManager:
                     draft.ai_generation_metadata = {}
                 draft.ai_generation_metadata['error'] = {
                     'message': error_message,
-                    'timestamp': datetime.utcnow().isoformat()
+                    'timestamp': datetime.now(UTC)
                 }
                 self.db_session.commit()
                 return True
@@ -745,6 +745,7 @@ class DataFlowManager:
                 AnalyzedTrend.topic_name
             ).limit(10).all()
             
+            print("1")
             # Get automation rules performance
             automation_rules = self.automation_repo.get_active_rules(founder_id)
             
@@ -754,8 +755,20 @@ class DataFlowManager:
                 func.count(GeneratedContentDraft.id).label('count')
             ).filter(
                 GeneratedContentDraft.founder_id == founder_id,
-                GeneratedContentDraft.created_at >= datetime.utcnow() - timedelta(days=days)
+                GeneratedContentDraft.created_at >= datetime.now(UTC) - timedelta(days=days)
             ).group_by(GeneratedContentDraft.status).all()
+            
+            print("2")
+            # Average engagement rate
+            avg_engagement = self.db_session.query(
+                func.avg(PostAnalytic.engagement_rate)
+            ).scalar() or 0
+            print("3")
+            # Twitter credentials status
+            twitter_connected = self.db_session.query(TwitterCredential).count()
+            expired_tokens = self.db_session.query(TwitterCredential).filter(
+                TwitterCredential.token_expires_at < datetime.now(UTC)
+            ).count()
             
             return {
                 'summary': summary,
@@ -775,7 +788,8 @@ class DataFlowManager:
                 'content_status_distribution': {
                     status: count for status, count in content_status_dist
                 },
-                'period_days': days
+                'period_days': days,
+                'avg_engagement_rate': round(float(avg_engagement), 2)
             }
             
         except Exception as e:
@@ -942,13 +956,13 @@ class DataFlowManager:
         try:
             # Clean up expired trends
             expired_trends_count = self.db_session.query(AnalyzedTrend).filter(
-                AnalyzedTrend.expires_at < func.now()
+                AnalyzedTrend.expires_at < datetime.now(UTC)
             ).delete()
             
             cleanup_counts['expired_trends'] = expired_trends_count
             
             # Clean up old rejected drafts (older than 30 days)
-            old_date = datetime.utcnow() - timedelta(days=30)
+            old_date = datetime.now(UTC) - timedelta(days=30)
             old_drafts_count = self.db_session.query(GeneratedContentDraft).filter(
                 GeneratedContentDraft.status == 'rejected',
                 GeneratedContentDraft.created_at < old_date
@@ -957,7 +971,7 @@ class DataFlowManager:
             cleanup_counts['old_drafts'] = old_drafts_count
             
             # Clean up very old analytics (older than 1 year by default)
-            analytics_cutoff = datetime.utcnow() - timedelta(days=365)
+            analytics_cutoff = datetime.now(UTC) - timedelta(days=365)
             stale_analytics_count = self.db_session.query(PostAnalytic).filter(
                 PostAnalytic.posted_at < analytics_cutoff
             ).delete()
@@ -965,7 +979,7 @@ class DataFlowManager:
             cleanup_counts['stale_analytics'] = stale_analytics_count
             
             # Deactivate rules that haven't been triggered in 90 days
-            inactive_rule_cutoff = datetime.utcnow() - timedelta(days=90)
+            inactive_rule_cutoff = datetime.now(UTC) - timedelta(days=90)
             inactive_rules = self.db_session.query(AutomationRule).filter(
                 or_(
                     AutomationRule.last_triggered_at < inactive_rule_cutoff,
@@ -1009,15 +1023,15 @@ class DataFlowManager:
             
             # Count active entities
             active_founders = self.db_session.query(Founder).filter(
-                Founder.created_at >= datetime.utcnow() - timedelta(days=30)
+                Founder.created_at >= datetime.now(UTC) - timedelta(days=30)
             ).count()
             
             recent_trends = self.db_session.query(AnalyzedTrend).filter(
-                AnalyzedTrend.analyzed_at >= datetime.utcnow() - timedelta(days=7)
+                AnalyzedTrend.analyzed_at >= datetime.now(UTC) - timedelta(days=7)
             ).count()
             
             recent_content = self.db_session.query(GeneratedContentDraft).filter(
-                GeneratedContentDraft.created_at >= datetime.utcnow() - timedelta(days=7)
+                GeneratedContentDraft.created_at >= datetime.now(UTC) - timedelta(days=7)
             ).count()
             
             # Content status distribution
@@ -1025,16 +1039,16 @@ class DataFlowManager:
                 GeneratedContentDraft.status,
                 func.count(GeneratedContentDraft.id)
             ).group_by(GeneratedContentDraft.status).all()
-            
+            print("4")
             # Average engagement rate
             avg_engagement = self.db_session.query(
                 func.avg(PostAnalytic.engagement_rate)
             ).scalar() or 0
-            
+            print("5")
             # Twitter credentials status
             twitter_connected = self.db_session.query(TwitterCredential).count()
             expired_tokens = self.db_session.query(TwitterCredential).filter(
-                TwitterCredential.token_expires_at < datetime.utcnow()
+                TwitterCredential.token_expires_at < datetime.now(UTC)
             ).count()
             
             return {
@@ -1057,7 +1071,7 @@ class DataFlowManager:
                     'expired_tokens': expired_tokens,
                     'connection_rate': round(twitter_connected / max(founders_count, 1) * 100, 1)
                 },
-                'timestamp': datetime.utcnow()
+                'timestamp': datetime.now(UTC)
             }
             
         except Exception as e:
@@ -1093,11 +1107,11 @@ class DataFlowManager:
             twitter_creds = self.get_twitter_credentials(founder_id)
             
             return {
-                'export_timestamp': datetime.utcnow().isoformat(),
+                'export_timestamp': datetime.now(UTC),
                 'founder': {
                     'id': str(founder.id),
                     'email': founder.email,
-                    'created_at': founder.created_at.isoformat(),
+                    'created_at': founder.created_at,
                     'settings': founder.settings
                 },
                 'products': [
@@ -1108,7 +1122,7 @@ class DataFlowManager:
                         'core_values': product.core_values,
                         'target_audience': product.target_audience_description,
                         'niche_definition': product.niche_definition,
-                        'created_at': product.created_at.isoformat()
+                        'created_at': product.created_at
                     }
                     for product in products
                 ],
@@ -1116,7 +1130,7 @@ class DataFlowManager:
                     {
                         'id': str(trend.id),
                         'topic_name': trend.topic_name,
-                        'analyzed_at': trend.analyzed_at.isoformat(),
+                        'analyzed_at': trend.analyzed_at,
                         'relevance_score': trend.niche_relevance_score,
                         'sentiment_scores': trend.sentiment_scores,
                         'is_micro_trend': trend.is_micro_trend
@@ -1130,7 +1144,7 @@ class DataFlowManager:
                         'generated_text': draft.generated_text,
                         'edited_text': draft.edited_text,
                         'status': draft.status,
-                        'created_at': draft.created_at.isoformat(),
+                        'created_at': draft.created_at,
                         'posted_tweet_id': draft.posted_tweet_id
                     }
                     for draft in content_drafts
@@ -1154,7 +1168,7 @@ class DataFlowManager:
                         'retweets': analytic.retweets,
                         'replies': analytic.replies,
                         'engagement_rate': analytic.engagement_rate,
-                        'posted_at': analytic.posted_at.isoformat() if analytic.posted_at else None
+                        'posted_at': analytic.posted_at if analytic.posted_at else None
                     }
                     for analytic in analytics
                 ],
@@ -1234,266 +1248,33 @@ class DataFlowManager:
         except Exception as e:
             logger.error(f"Failed to bulk update trend expiration: {e}")
             self.db_session.rollback()
-# ====================
-# File: database/__init__.py (COMPLETE)
-# ====================
 
-"""
-Database Package for Ideation System
-
-This package provides complete database functionality including:
-- SQLAlchemy models for all database tables
-- Repository pattern for data access
-- Data flow management according to DFD specifications
-- Database connection and session management
-- Migration and maintenance utilities
-
-Usage:
-    from database import init_database, get_db_session, DataFlowManager
-    
-    # Initialize database
-    init_database('postgresql://user:pass@localhost/ideation')
-    
-    # Use data flow manager
-    with get_db_session() as session:
-        data_flow = DataFlowManager(session)
-        founder_id = data_flow.process_founder_registration(data)
-"""
-
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
-from sqlalchemy.pool import QueuePool
-import os
-import logging
-from typing import Generator
-
-# Import all models
-from .models import (
-    Base, Founder, Product, TwitterCredential, TrackedTrendRaw,
-    AnalyzedTrend, GeneratedContentDraft, AutomationRule, PostAnalytic
-)
-
-# Import repositories
-from .repositories import (
-    BaseRepository, FounderRepository, ProductRepository, 
-    TrendRepository, ContentRepository, AnalyticsRepository
-)
-from .repositories.automation_repository import AutomationRepository
-
-# Import data flow manager
-from .data_flow_manager import DataFlowManager
-
-# Import configuration
-from config.database_config import database_config
-
-logger = logging.getLogger(__name__)
-
-class DatabaseManager:
-    """Database connection and session management"""
-    
-    def __init__(self, database_url: str = None, echo: bool = False):
-        self.database_url = database_url or database_config.DATABASE_URL
+    def recalculate_engagement_rates(self) -> int:
+        """
+        Recalculate engagement rates for all analytics records
         
-        # Validate configuration
-        config_validation = database_config.validate_config()
-        if not config_validation['valid']:
-            logger.error(f"Database configuration errors: {config_validation['errors']}")
-            raise ValueError("Invalid database configuration")
-        
-        if config_validation['warnings']:
-            for warning in config_validation['warnings']:
-                logger.warning(f"Database configuration warning: {warning}")
-        
-        # Create engine with connection pooling
-        connection_params = database_config.get_connection_params()
-        if database_url:
-            connection_params['url'] = database_url
-        if echo:
-            connection_params['echo'] = echo
+        Returns:
+            Number of records updated
+        """
+        try:
+            updated_count = 0
             
-        self.engine = create_engine(**connection_params)
-        
-        # Create session factory
-        self.SessionLocal = sessionmaker(
-            autocommit=False,
-            autoflush=False,
-            bind=self.engine
-        )
-        
-        logger.info("Database manager initialized successfully")
-    
-    def create_tables(self):
-        """Create all database tables"""
-        try:
-            Base.metadata.create_all(bind=self.engine)
-            logger.info("Database tables created successfully")
+            analytics_records = self.db_session.query(PostAnalytic).all()
+            
+            for record in analytics_records:
+                if record.impressions and record.impressions > 0:
+                    old_rate = record.engagement_rate
+                    record.engagement_rate = record.calculate_engagement_rate()
+                    
+                    if old_rate != record.engagement_rate:
+                        updated_count += 1
+            
+            self.db_session.commit()
+            logger.info(f"Recalculated engagement rates for {updated_count} records")
+            
+            return updated_count
+            
         except Exception as e:
-            logger.error(f"Failed to create database tables: {e}")
-            raise
-    
-    def drop_tables(self):
-        """Drop all database tables (use with caution!)"""
-        try:
-            Base.metadata.drop_all(bind=self.engine)
-            logger.info("Database tables dropped successfully")
-        except Exception as e:
-            logger.error(f"Failed to drop database tables: {e}")
-            raise
-    
-    def get_session(self) -> Session:
-        """Get a new database session"""
-        return self.SessionLocal()
-    
-    def get_session_context(self) -> Generator[Session, None, None]:
-        """Get database session with context management"""
-        session = self.get_session()
-        try:
-            yield session
-        except Exception:
-            session.rollback()
-            raise
-        finally:
-            session.close()
-    
-    def health_check(self) -> bool:
-        """Check database connectivity"""
-        try:
-            with self.get_session() as session:
-                session.execute("SELECT 1")
-                return True
-        except Exception as e:
-            logger.error(f"Database health check failed: {e}")
-            return False
-    
-    def get_connection_info(self) -> dict:
-        """Get database connection information"""
-        return {
-            'url': self.database_url,
-            'pool_size': database_config.POOL_SIZE,
-            'max_overflow': database_config.MAX_OVERFLOW,
-            'echo': database_config.ECHO_SQL
-        }
-
-# Global database manager instance
-_db_manager = None
-
-def init_database(database_url: str = None, create_tables: bool = True, echo: bool = False):
-    """
-    Initialize database with optional table creation
-    
-    Args:
-        database_url: Database connection URL
-        create_tables: Whether to create tables
-        echo: Whether to echo SQL statements
-    """
-    global _db_manager
-    
-    _db_manager = DatabaseManager(database_url, echo)
-    
-    if create_tables:
-        _db_manager.create_tables()
-    
-    logger.info("Database initialized successfully")
-
-def get_db_manager() -> DatabaseManager:
-    """Get the global database manager instance"""
-    if _db_manager is None:
-        raise RuntimeError("Database not initialized. Call init_database() first.")
-    return _db_manager
-
-def get_db_session() -> Session:
-    """Get a new database session"""
-    return get_db_manager().get_session()
-
-def get_db_context():
-    """Get database session context manager"""
-    return get_db_manager().get_session_context()
-
-def health_check() -> bool:
-    """Check database health"""
-    try:
-        return get_db_manager().health_check()
-    except RuntimeError:
-        return False
-
-# Convenience function to get data flow manager
-def get_data_flow_manager(session: Session = None) -> DataFlowManager:
-    """
-    Get data flow manager instance
-    
-    Args:
-        session: Database session (optional, will create new if not provided)
-        
-    Returns:
-        DataFlowManager instance
-    """
-    if session is None:
-        session = get_db_session()
-    
-    return DataFlowManager(session)
-
-# Export all important classes and functions
-__all__ = [
-    # Core database classes
-    'DatabaseManager',
-    'DataFlowManager',
-    
-    # Models
-    'Base',
-    'Founder', 
-    'Product',
-    'TwitterCredential',
-    'AnalyzedTrend',
-    'GeneratedContentDraft',
-    'AutomationRule',
-    'PostAnalytic',
-    'TrackedTrendRaw',
-    
-    # Repositories
-    'BaseRepository',
-    'FounderRepository',
-    'ProductRepository',
-    'TrendRepository', 
-    'ContentRepository',
-    'AnalyticsRepository',
-    'AutomationRepository',
-    
-    # Convenience functions
-    'init_database',
-    'get_db_manager',
-    'get_db_session',
-    'get_db_context',
-    'get_data_flow_manager',
-    'health_check'
-]
-
-    
-def recalculate_engagement_rates(self) -> int:
-    """
-    Recalculate engagement rates for all analytics records
-    
-    Returns:
-        Number of records updated
-    """
-    try:
-        updated_count = 0
-        
-        analytics_records = self.db_session.query(PostAnalytic).all()
-        
-        for record in analytics_records:
-            if record.impressions and record.impressions > 0:
-                old_rate = record.engagement_rate
-                record.engagement_rate = record.calculate_engagement_rate()
-                
-                if old_rate != record.engagement_rate:
-                    updated_count += 1
-        
-        self.db_session.commit()
-        logger.info(f"Recalculated engagement rates for {updated_count} records")
-        
-        return updated_count
-        
-    except Exception as e:
-        logger.error(f"Failed to recalculate engagement rates: {e}")
-        self.db_session.rollback()
-        return 0
+            logger.error(f"Failed to recalculate engagement rates: {e}")
+            self.db_session.rollback()
+            return 0

@@ -1,11 +1,13 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from sqlalchemy import func, and_, or_
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from database.models import PostAnalytic
 from database.repositories.base_repository import BaseRepository
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 import logging
+
+logger = logging.getLogger(__name__)
 
 class AnalyticsRepository(BaseRepository):
     """Repository for analytics operations"""
@@ -59,7 +61,7 @@ class AnalyticsRepository(BaseRepository):
                                     days: int = 30) -> Dict[str, Any]:
         """Get analytics summary for a founder"""
         try:
-            since_date = datetime.utcnow() - timedelta(days=days)
+            since_date = datetime.now(UTC) - timedelta(days=days)
             
             # Get analytics data
             analytics = self.db_session.query(PostAnalytic).filter(
@@ -121,7 +123,7 @@ class AnalyticsRepository(BaseRepository):
     def get_engagement_trends(self, founder_id: str, days: int = 30) -> List[Dict[str, Any]]:
         """Get daily engagement trends"""
         try:
-            since_date = datetime.utcnow() - timedelta(days=days)
+            since_date = datetime.now(UTC) - timedelta(days=days)
             
             # Query daily aggregations
             daily_stats = self.db_session.query(
@@ -142,7 +144,7 @@ class AnalyticsRepository(BaseRepository):
             
             return [
                 {
-                    'date': stat.date.isoformat(),
+                    'date': stat.date,
                     'posts_count': stat.posts_count,
                     'total_impressions': stat.total_impressions or 0,
                     'total_engagements': stat.total_engagements or 0,

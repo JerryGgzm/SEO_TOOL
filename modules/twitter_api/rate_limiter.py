@@ -91,5 +91,5 @@ class TwitterRateLimiter:
                 'remaining': rate_info.remaining,
                 'reset_time': rate_info.reset_time,
                 'time_until_reset': rate_info.time_until_reset(),
-                'last_updated': rate_info.last_updated.isoformat()
+                'last_updated': rate_info.last_updated
             }

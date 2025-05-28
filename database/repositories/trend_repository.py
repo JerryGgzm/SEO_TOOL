@@ -1,6 +1,7 @@
 from database.models import AnalyzedTrend
 from database.repositories.base_repository import BaseRepository
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import Optional, List
 from sqlalchemy.exc import SQLAlchemyError
 import logging

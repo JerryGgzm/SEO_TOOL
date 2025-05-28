@@ -209,11 +209,11 @@ class MicroTrendDetector:
         
         for trend in analyzed_trends:
             # Check minimum volume requirement
-            if trend.tweet_volume and trend.tweet_volume < self.min_tweet_volume:
+            if trend.metrics.tweet_volume < self.min_tweet_volume:
                 continue
             
             # Check velocity threshold
-            if not trend.velocity_score or trend.velocity_score < self.velocity_threshold:
+            if not trend.trend_velocity_score or trend.trend_velocity_score < self.velocity_threshold:
                 continue
             
             # Check early adopter ratio

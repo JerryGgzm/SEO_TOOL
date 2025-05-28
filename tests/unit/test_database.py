@@ -3,22 +3,27 @@ from unittest.mock import Mock, patch
 from datetime import datetime, timedelta
 import json
 
-from database import init_database, get_db_session, DataFlowManager
+from database import DataFlowManager
 from database.models import Founder, Product, AnalyzedTrend
 from database.repositories import FounderRepository, ProductRepository
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from database.models import Base
+
 
 class TestFounderRepository:
     @pytest.fixture
     def db_session(self):
-        # Use in-memory SQLite for testing
-        from sqlalchemy import create_engine
-        from sqlalchemy.orm import sessionmaker
-        from database.models import Base
-        
         engine = create_engine('sqlite:///:memory:', echo=False)
         Base.metadata.create_all(engine)
-        SessionLocal = sessionmaker(bind=engine)
-        return SessionLocal()
+        
+        Session = sessionmaker(bind=engine)
+        session = Session()
+        
+        yield session
+        
+        session.close()
     
     @pytest.fixture
     def founder_repo(self, db_session):
@@ -66,14 +71,21 @@ class TestFounderRepository:
 class TestDataFlowManager:
     @pytest.fixture
     def db_session(self):
+        # 使用内存中的 SQLite 进行测试
         from sqlalchemy import create_engine
         from sqlalchemy.orm import sessionmaker
         from database.models import Base
         
+        # 使用内存数据库，避免 PostgreSQL 连接问题
         engine = create_engine('sqlite:///:memory:', echo=False)
         Base.metadata.create_all(engine)
-        SessionLocal = sessionmaker(bind=engine)
-        return SessionLocal()
+        
+        Session = sessionmaker(bind=engine)
+        session = Session()
+        
+        yield session
+        
+        session.close()
     
     @pytest.fixture
     def data_flow(self, db_session):
