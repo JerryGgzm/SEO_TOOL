@@ -269,21 +269,23 @@ class TestTrendAnalysisEngine:
     async def test_analyze_trends_for_user(self, analysis_engine):
         """Test full trend analysis workflow"""
         
-        # 模拟create_analysis_request方法，返回正确的TrendAnalysisRequest对象
+        # mock create_analysis_request method, return correct TrendAnalysisRequest object
         with patch.object(analysis_engine.user_service, 'create_analysis_request') as mock_create_request:
             with patch.object(analysis_engine.twitter_client, 'get_trends_for_location') as mock_get_trends:
                 with patch.object(analysis_engine.twitter_client, 'search_tweets') as mock_search:
                     
-                    # Setup mocks - 使用实际的TrendAnalysisRequest对象
+                    # Setup mocks - use actual TrendAnalysisRequest object
                     from modules.trend_analysis.models import TrendAnalysisRequest
                     
-                    mock_create_request.return_value = TrendAnalysisRequest(
+                    request = TrendAnalysisRequest(
                         user_id='test_user',
-                        location_woeid=1,  # 添加缺失的location_woeid
+                        location_woeid=1,  # add missing location_woeid
                         max_trends=10,
                         include_micro_trends=True,
                         sentiment_analysis=True
                     )
+                    
+                    mock_create_request.return_value = request
                     
                     mock_get_trends.return_value = [
                         {'name': '#AI', 'tweet_volume': 1000}
@@ -301,8 +303,8 @@ class TestTrendAnalysisEngine:
                         ]
                     }
                     
-                    # Run analysis with await
-                    result = await analysis_engine.analyze_trends_for_user('test_user')
+                    # Run analysis with await - pass request parameter
+                    result = await analysis_engine.analyze_trends_for_user('test_user', request)
                     
                     # Verify results
                     assert isinstance(result, list)

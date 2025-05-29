@@ -1,4 +1,4 @@
-"""Twitter API客户端""" 
+"""Twitter API Client""" 
 import requests
 import json
 import time

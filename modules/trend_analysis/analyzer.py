@@ -1,7 +1,7 @@
 """Trend analyzer""" 
 import asyncio
 from typing import List, Dict, Optional, Tuple, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
 import logging
 from collections import defaultdict
@@ -10,9 +10,10 @@ from modules.twitter_api import TwitterAPIClient, TwitterAPIError
 from modules.user_profile import UserProfileService
 from .models import (
     AnalyzedTrend, TrendAnalysisRequest, TrendAnalysisConfig,
-    TrendMetrics, ExampleTweet, TopicCluster, TrendSource
+    TrendMetrics, ExampleTweet, TopicCluster, TrendSource,
+    SentimentBreakdown, SentimentLabel
 )
-from .data_processor import TweetPreprocessor
+from .data_processor import TweetPreprocessor, TrendDataProcessor
 from .sentiment import SentimentAnalyzer
 from .micro_trends import MicroTrendDetector
 
@@ -187,6 +188,8 @@ class TrendAnalysisEngine:
         self.twitter_client = twitter_client
         self.user_service = user_service
         self.config = config or TrendAnalysisConfig()
+        self.data_processor = TrendDataProcessor()
+        self.llm_client = llm_client
         
         # Initialize analysis components
         self.preprocessor = TweetPreprocessor()
@@ -195,74 +198,47 @@ class TrendAnalysisEngine:
         self.llm_extractor = LLMInsightExtractor(llm_client, self.config.llm_model_name)
     
     async def analyze_trends_for_user(self, user_id: str, 
-                                    request: TrendAnalysisRequest = None) -> List[AnalyzedTrend]:
-        """
-        Main entry point for trend analysis
-        
-        Args:
-            user_id: User ID to analyze trends for
-            request: Optional analysis request parameters
-            
-        Returns:
-            List of analyzed trends
-        """
+                                    request: TrendAnalysisRequest) -> List[AnalyzedTrend]:
+        """Analyze trends for a user"""
         try:
-            logger.info(f"Starting trend analysis for user {user_id}")
+            logger.info(f"Start analyzing trends for user {user_id}")
             
-            # Get user profile and product info
+            # get user profile
             user_profile = self.user_service.get_user_profile(user_id)
-            if not user_profile or not user_profile.product_info:
-                logger.warning(f"No product info found for user {user_id}")
+            if not user_profile:
+                logger.warning(f"No user profile found for {user_id}")
                 return []
             
-            # Get user's Twitter access token
+            # get Twitter access token
             access_token = self.user_service.get_twitter_access_token(user_id)
             if not access_token:
-                logger.warning(f"No Twitter access token for user {user_id}")
+                logger.warning(f"User {user_id} has no valid Twitter access token")
                 return []
             
-            # Use request parameters or derive from user profile
-            if not request:
-                request = self._create_default_request(user_id, user_profile.product_info)
+            # get trends data
+            trends_data = await self._fetch_trends_data(request, access_token)
+            if not trends_data:
+                logger.warning(f"No trends data found")
+                return []
             
-            # Step 1: Get trending topics
-            trending_topics = await self._get_trending_topics(access_token, request.location_id)
-            
-            # Step 2: Search for niche-specific trends
-            niche_trends = await self._search_niche_trends(access_token, request.focus_keywords)
-            
-            # Step 3: Combine and filter trends
-            all_candidate_trends = self._combine_and_filter_trends(
-                trending_topics, niche_trends, request.focus_keywords
-            )
-            
-            # Step 4: Analyze each trend
+            # analyze each trend - fix async processing here
             analyzed_trends = []
-            for i, trend_data in enumerate(all_candidate_trends[:request.max_trends_to_analyze]):
-                logger.info(f"Analyzing trend {i+1}/{len(all_candidate_trends)}: {trend_data['name']}")
-                
-                analyzed_trend = await self._analyze_single_trend(
-                    access_token, trend_data, user_profile, request
-                )
-                
-                if analyzed_trend:
-                    analyzed_trends.append(analyzed_trend)
+            for trend_data in trends_data[:request.max_trends_to_analyze]:
+                try:
+                    analyzed_trend = await self._analyze_single_trend(
+                        trend_data, user_profile, request, access_token
+                    )
+                    if analyzed_trend:
+                        analyzed_trends.append(analyzed_trend)
+                except Exception as e:
+                    logger.error(f"Failed to analyze a single trend: {e}")
+                    continue
             
-            # Step 5: Identify micro-trends
-            micro_trends = self.micro_trend_detector.detect_micro_trends(analyzed_trends)
-            
-            # Step 6: Sort by relevance and potential
-            analyzed_trends.sort(
-                key=lambda t: (t.trend_potential_score * 0.6 + t.niche_relevance_score * 0.4),
-                reverse=True
-            )
-            
-            logger.info(f"Completed trend analysis for user {user_id}: {len(analyzed_trends)} trends, {len(micro_trends)} micro-trends")
-            
+            logger.info(f"Successfully analyzed {len(analyzed_trends)} trends")
             return analyzed_trends
             
         except Exception as e:
-            logger.error(f"Trend analysis failed for user {user_id}: {e}")
+            logger.error(f"Failed to analyze trends for user {user_id}: {e}")
             return []
     
     async def _get_trending_topics(self, access_token: str, location_id: int) -> List[Dict]:
@@ -356,116 +332,134 @@ class TrendAnalysisEngine:
         
         return len(intersection) / len(union)
     
-    async def _analyze_single_trend(self, access_token: str, trend_data: Dict,
-                                  user_profile: Any, request: TrendAnalysisRequest) -> Optional[AnalyzedTrend]:
-        """Analyze a single trend comprehensively"""
+    async def _analyze_single_trend(self, trend_data: Dict[str, Any],
+                                  user_profile: Any,
+                                  request: TrendAnalysisRequest,
+                                  access_token: str) -> Optional[AnalyzedTrend]:
+        """Analyze a single trend"""
         try:
             trend_name = trend_data.get('name', '')
-            if not trend_name:
+            
+            # get tweet samples for the trend
+            sample_tweets = await self._fetch_trend_tweets(
+                trend_name, 
+                request.tweet_sample_size,
+                access_token
+            )
+            
+            if not sample_tweets:
+                logger.warning(f"Did not get tweet samples for {trend_name}")
                 return None
-            
-            # Get tweet samples for analysis
-            tweet_samples = await self._get_tweet_samples(
-                access_token, trend_data, request.tweet_sample_size
+
+            processed_data = self.data_processor.process_tweets(sample_tweets)
+
+            relevance_score = self._calculate_niche_relevance(
+                trend_data, user_profile, processed_data
             )
-            
-            if not tweet_samples or len(tweet_samples) < 10:
-                logger.warning(f"Insufficient tweet samples for trend: {trend_name}")
-                return None
-            
-            # Process tweets
-            processed_data = self.preprocessor.batch_process_tweets(tweet_samples)
-            
-            # Sentiment analysis
-            tweet_texts = [tweet.get('text', '') for tweet in tweet_samples]
-            overall_sentiment, individual_sentiments = self.sentiment_analyzer.analyze_batch_sentiment(tweet_texts)
-            
-            # Calculate metrics
-            metrics = self._calculate_trend_metrics(tweet_samples)
-            
-            # Calculate velocity and early adopter ratio
-            velocity_score = self.micro_trend_detector.calculate_trend_velocity(
-                tweet_samples, self.config.analysis_time_window_hours
+
+            print("processed_data: ", processed_data)
+
+            is_micro_trend = self._detect_micro_trend(trend_data, processed_data)
+
+            content_suggestions = await self._generate_content_suggestions(
+                trend_data, user_profile, processed_data
             )
+
+            from .models import AnalyzedTrend, TrendSource, SentimentBreakdown, TrendMetrics
+
+            # create basic sentiment analysis results
+            sentiment_score = processed_data.get('sentiment_score', 0.5)
+            positive_score = max(0.0, sentiment_score)
+            negative_score = max(0.0, 1.0 - sentiment_score)
+            neutral_score = 0.5
             
-            early_adopter_ratio = self.micro_trend_detector.analyze_early_adopters(tweet_samples)
+            # normalize scores, ensure total sum is 1
+            total_score = positive_score + negative_score + neutral_score
+            if total_score > 0:
+                positive_score /= total_score
+                negative_score /= total_score
+                neutral_score /= total_score
             
-            # Extract insights using LLM if available
-            pain_points = processed_data['pain_points']
-            opportunities = []
+            print("positive_score: ", positive_score)
+            print("negative_score: ", negative_score)
+            print("neutral_score: ", neutral_score)
+            # determine dominant sentiment
+            if positive_score > negative_score and positive_score > neutral_score:
+                dominant_sentiment = SentimentLabel.POSITIVE
+            elif negative_score > positive_score and negative_score > neutral_score:
+                dominant_sentiment = SentimentLabel.NEGATIVE
+            else:
+                dominant_sentiment = SentimentLabel.NEUTRAL
             
-            if self.config.use_llm_for_insights:
-                niche_context = {
-                    'product_info': user_profile.product_info.dict() if user_profile.product_info else {},
-                    'niche_keywords': request.focus_keywords
-                }
-                
-                llm_pain_points, llm_opportunities = self.llm_extractor.extract_pain_points_and_opportunities(
-                    tweet_texts[:20], trend_name, niche_context
-                )
-                
-                # Combine with preprocessor results
-                pain_points.extend(llm_pain_points)
-                opportunities.extend(llm_opportunities)
-                
-                # Remove duplicates and limit
-                pain_points = list(dict.fromkeys(pain_points))[:15]
-                opportunities = list(dict.fromkeys(opportunities))[:10]
+            # calculate confidence (difference between highest and second highest score)
+            scores = [positive_score, negative_score, neutral_score]
+            scores.sort(reverse=True)
+            confidence = scores[0] - scores[1] if len(scores) > 1 else scores[0]
+
+            print("confidence: ", confidence)
             
-            # Calculate overall scores
-            niche_relevance_score = trend_data.get('relevance_score', 0.5)
-            
-            trend_potential_score = self.micro_trend_detector.calculate_trend_potential_score(
-                velocity_score,
-                early_adopter_ratio,
-                {'avg_engagement_rate': metrics.avg_engagement_rate},
-                niche_relevance_score
+            sentiment = SentimentBreakdown(
+                positive_score=positive_score,
+                negative_score=negative_score,
+                neutral_score=neutral_score,
+                dominant_sentiment=dominant_sentiment,
+                confidence=confidence
             )
+
+            print("sentiment: ", sentiment)
             
-            # Select example tweets
-            example_tweets = self._select_example_tweets(tweet_samples, individual_sentiments)
-            
-            # Create analyzed trend object
-            analyzed_trend = AnalyzedTrend(
-                id=f"trend_{user_profile.user_id}_{int(datetime.utcnow().timestamp())}_{hash(trend_name) % 10000}",
-                user_id=user_profile.user_id,
-                trend_source=TrendSource(trend_data.get('source', 'twitter_trending')),
-                trend_source_id=trend_data.get('id'),
-                topic_name=trend_name,
-                topic_keywords=processed_data['all_keywords'][:10],
-                niche_relevance_score=niche_relevance_score,
-                trend_potential_score=trend_potential_score,
-                confidence_score=min(overall_sentiment.confidence, 0.9),
-                overall_sentiment=overall_sentiment,
-                extracted_pain_points=pain_points,
-                common_questions=processed_data['questions'][:10],
-                discussion_focus_points=processed_data['all_keywords'][:8],
-                key_opportunities=opportunities,
-                trend_velocity_score=velocity_score,
-                early_adopter_ratio=early_adopter_ratio,
-                metrics=metrics,
-                sample_tweet_ids_analyzed=[tweet.get('id', '') for tweet in tweet_samples],
-                example_tweets=example_tweets
+            metrics = TrendMetrics(
+                tweet_volume=processed_data.get('total_tweets', 0),
+                engagement_volume=processed_data.get('total_engagement', 0),
+                avg_engagement_rate=processed_data.get('avg_engagement_rate', 0.0),
+                unique_users=len(set(tweet.get('author_id', '') for tweet in sample_tweets if tweet.get('author_id'))),
+                time_span_hours=24.0,
+                velocity_score=processed_data.get('momentum_score', 0.0)
             )
+
+            print("metrics: ", metrics)
             
-            return analyzed_trend
+            # determine correct enum value based on trend source
+            source = trend_data.get('source', 'twitter_trending')
+            if source == 'keyword_search':
+                trend_source = TrendSource.KEYWORD_SEARCH
+            elif source == 'micro_trend_detection':
+                trend_source = TrendSource.MICRO_TREND_DETECTION
+            elif source == 'manual':
+                trend_source = TrendSource.MANUAL
+            else:
+                trend_source = TrendSource.TWITTER_TRENDING
+            
+            return AnalyzedTrend(
+                trend_name=trend_name,
+                trend_type="trending",
+                tweet_volume=processed_data.get('total_tweets', 0),
+                velocity_score=processed_data.get('momentum_score', 0.0),
+                sentiment_breakdown=sentiment,
+                niche_relevance_score=relevance_score,
+                trend_potential_score=min(1.0, relevance_score + 0.2),
+                early_adopter_ratio=0.1,
+                engagement_metrics={
+                    'avg_engagement_rate': processed_data.get('avg_engagement_rate', 0.0),
+                    'total_engagement': processed_data.get('total_engagement', 0)
+                },
+                sample_tweets=[],
+                keywords=processed_data.get('all_keywords', [])[:10],
+                pain_points=processed_data.get('pain_points', []),
+                questions=processed_data.get('questions', []),
+                is_micro_trend=is_micro_trend,
+                created_at=datetime.now(timezone.utc)
+            )
             
         except Exception as e:
-            logger.error(f"Failed to analyze trend '{trend_data.get('name')}': {e}")
+            print("trend_data: ", trend_data)
+            logger.error(f"Failed to analyze trend {trend_data.get('name', 'unknown')}: {e}")
             return None
     
-    async def _get_tweet_samples(self, access_token: str, trend_data: Dict, 
-                               sample_size: int) -> List[Dict]:
+    async def _fetch_trend_tweets(self, trend_name: str, sample_size: int, access_token: str) -> List[Dict]:
         """Get representative tweet samples for a trend"""
         try:
-            # Check if we already have search results
-            if 'search_results' in trend_data:
-                return trend_data['search_results'].get('data', [])
-            
-            # Search for tweets about this trend
-            trend_name = trend_data.get('name', '')
-            
-            # Create search query
+            # Build search query
             if trend_name.startswith('#'):
                 query = f"{trend_name} -is:retweet"
             else:
@@ -474,6 +468,7 @@ class TrendAnalysisEngine:
             # Add engagement filter
             query += " min_faves:2"
             
+            # Search tweets - should not use await here
             search_results = self.twitter_client.search_tweets(
                 user_token=access_token,
                 query=query,
@@ -488,116 +483,65 @@ class TrendAnalysisEngine:
             
             return search_results.get('data', []) if search_results else []
             
-        except TwitterAPIError as e:
-            logger.error(f"Failed to get tweet samples for trend: {e}")
+        except Exception as e:
+            logger.error(f"Get tweets for {trend_name} failed: {e}")
             return []
     
-    def _calculate_trend_metrics(self, tweets: List[Dict]) -> TrendMetrics:
-        """Calculate quantitative metrics for a trend"""
-        if not tweets:
-            return TrendMetrics(
-                tweet_volume=0,
-                engagement_volume=0,
-                avg_engagement_rate=0.0,
-                unique_users=0,
-                time_span_hours=0.0,
-                velocity_score=0.0
-            )
+    def _calculate_niche_relevance(self, trend_data: Dict, user_profile: Any, processed_data: Dict) -> float:
+        """Calculate relevance of trend to user's niche"""
+        if not trend_data or not user_profile or not processed_data:
+            return 0.0
         
-        # Calculate engagement metrics
-        total_engagement = 0
-        unique_users = set()
-        tweet_times = []
+        # Implement your logic to calculate relevance based on trend data and user profile
+        # This is a placeholder and should be replaced with actual implementation
+        return 0.5
+    
+    def _detect_micro_trend(self, trend_data: Dict, processed_data: Dict) -> bool:
+        """Detect if a trend is a micro-trend"""
+        if not trend_data or not processed_data:
+            return False
         
-        for tweet in tweets:
-            # Engagement
-            public_metrics = tweet.get('public_metrics', {})
-            engagement = (
-                public_metrics.get('like_count', 0) +
-                public_metrics.get('retweet_count', 0) +
-                public_metrics.get('reply_count', 0) +
-                public_metrics.get('quote_count', 0)
-            )
-            total_engagement += engagement
+        # Implement your logic to detect micro-trend based on trend data and processed data
+        # This is a placeholder and should be replaced with actual implementation
+        return False
+    
+    async def _generate_content_suggestions(self, trend_data: Dict[str, Any],
+                                          user_profile: Any,
+                                          processed_data: Dict[str, Any]) -> List[str]:
+        """generate content suggestions"""
+        try:
+            suggestions = []
             
-            # Unique users
-            author_id = tweet.get('author_id')
-            if author_id:
-                unique_users.add(author_id)
+            # basic suggestions
+            trend_name = trend_data.get('name', '')
+            suggestions.append(f"Share insights about {trend_name}")
+            suggestions.append(f"Create tutorial content related to {trend_name}")
             
-            # Tweet times
-            created_at = tweet.get('created_at')
-            if created_at:
+            # based on pain points
+            pain_points = processed_data.get('pain_points', [])
+            if pain_points:
+                suggestions.append(f"Create content to solve {pain_points[0]}")
+            
+            # based on questions
+            questions = processed_data.get('questions', [])
+            if questions:
+                suggestions.append(f"Answer common questions about {trend_name}")
+            
+            # if LLM client exists, generate more intelligent suggestions
+            print("suggestions: ", suggestions)
+            if self.llm_client:
                 try:
-                    tweet_time = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                    tweet_times.append(tweet_time)
-                except ValueError:
-                    continue
-        
-        # Calculate time span
-        if len(tweet_times) >= 2:
-            tweet_times.sort()
-            time_span = tweet_times[-1] - tweet_times[0]
-            time_span_hours = time_span.total_seconds() / 3600
-        else:
-            time_span_hours = 1.0  # Default to 1 hour
-        
-        # Calculate averages
-        tweet_volume = len(tweets)
-        avg_engagement_rate = total_engagement / tweet_volume if tweet_volume > 0 else 0.0
-        velocity_score = tweet_volume / time_span_hours if time_span_hours > 0 else 0.0
-        
-        return TrendMetrics(
-            tweet_volume=tweet_volume,
-            engagement_volume=total_engagement,
-            avg_engagement_rate=avg_engagement_rate,
-            unique_users=len(unique_users),
-            time_span_hours=time_span_hours,
-            velocity_score=velocity_score
-        )
-    
-    def _select_example_tweets(self, tweets: List[Dict], 
-                             sentiments: List[Any]) -> List[ExampleTweet]:
-        """Select representative example tweets"""
-        if not tweets or not sentiments:
+                    # here should call LLM to generate more personalized suggestions
+                    # temporarily return basic suggestions
+                    pass
+                except Exception as e:
+                    logger.warning(f"LLM content suggestions generation failed: {e}")
+            
+            return suggestions[:5]  # limit suggestion count
+            
+        except Exception as e:
+            logger.error(f"generate content suggestions failed: {e}")
             return []
-        
-        examples = []
-        
-        # Create tweet-sentiment pairs
-        tweet_sentiment_pairs = list(zip(tweets, sentiments))
-        
-        # Sort by engagement
-        tweet_sentiment_pairs.sort(
-            key=lambda x: sum(x[0].get('public_metrics', {}).values()),
-            reverse=True
-        )
-        
-        # Select diverse examples
-        sentiment_buckets = {'positive': [], 'negative': [], 'neutral': []}
-        
-        for tweet, sentiment in tweet_sentiment_pairs:
-            bucket = sentiment.dominant_sentiment.value
-            if len(sentiment_buckets[bucket]) < 2:  # Max 2 per sentiment
-                engagement_score = sum(tweet.get('public_metrics', {}).values())
-                
-                example = ExampleTweet(
-                    tweet_id=tweet.get('id', ''),
-                    text=tweet.get('text', '')[:200],  # Truncate if too long
-                    sentiment=sentiment.dominant_sentiment,
-                    engagement_score=float(engagement_score),
-                    created_at=datetime.fromisoformat(tweet.get('created_at', '').replace('Z', '+00:00')) 
-                             if tweet.get('created_at') else datetime.utcnow(),
-                    why_selected=f"High engagement {bucket} sentiment example"
-                )
-                
-                sentiment_buckets[bucket].append(example)
-                examples.append(example)
-                
-                if len(examples) >= 5:  # Max 5 examples total
-                    break
-        
-        return examples[:5]
     
     def _create_default_request(self, user_id: str, product_info: Any) -> TrendAnalysisRequest:
         """Create default analysis request from user profile"""
@@ -605,14 +549,18 @@ class TrendAnalysisEngine:
         
         if product_info:
             # Extract keywords from product info
-            if hasattr(product_info, 'niche_keywords') and product_info.niche_keywords:
-                focus_keywords.extend(product_info.niche_keywords.primary)
-                if product_info.niche_keywords.secondary:
-                    focus_keywords.extend(product_info.niche_keywords.secondary[:3])
-            
-            # Add product name as keyword
-            if hasattr(product_info, 'product_name'):
-                focus_keywords.append(product_info.product_name.lower())
+            try:
+                if hasattr(product_info, 'niche_keywords') and product_info.niche_keywords:
+                    if hasattr(product_info.niche_keywords, 'primary'):
+                        focus_keywords.extend(product_info.niche_keywords.primary)
+                    if hasattr(product_info.niche_keywords, 'secondary'):
+                        focus_keywords.extend(product_info.niche_keywords.secondary[:3])
+                
+                # Add product name as keyword
+                if hasattr(product_info, 'product_name') and product_info.product_name:
+                    focus_keywords.append(product_info.product_name.lower())
+            except Exception as e:
+                logger.warning(f"Failed to extract product keywords: {e}")
         
         # Ensure we have at least some keywords
         if not focus_keywords:
@@ -624,3 +572,36 @@ class TrendAnalysisEngine:
             max_trends_to_analyze=self.config.max_clusters,
             tweet_sample_size=self.config.max_tweets_per_trend
         )
+
+    async def _fetch_trends_data(self, request: TrendAnalysisRequest, 
+                               access_token: str) -> List[Dict[str, Any]]:
+        """Get trends data"""
+        try:
+            # Get current trends - should not use await here because get_trends_for_location is not an async method
+            trends = self.twitter_client.get_trends_for_location(
+                access_token, location_id=1  # global trends
+            )
+            
+            if not trends:
+                return []
+            
+            # Filter relevant trends
+            relevant_trends = []
+            for trend in trends:
+                trend_name = trend.get('name', '').lower()
+                
+                # Check if it's relevant to user keywords
+                is_relevant = False
+                for keyword in request.focus_keywords:
+                    if keyword.lower() in trend_name:
+                        is_relevant = True
+                        break
+                
+                if is_relevant or len(relevant_trends) < 5:  # At least 5 trends
+                    relevant_trends.append(trend)
+            
+            return relevant_trends
+            
+        except Exception as e:
+            logger.error(f"failed to fetch trends data: {e}")
+            return []

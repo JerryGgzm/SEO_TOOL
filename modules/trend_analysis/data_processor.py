@@ -12,6 +12,7 @@ from nltk.tag import pos_tag
 import spacy
 from textblob import TextBlob
 import logging
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -252,3 +253,210 @@ class TweetPreprocessor:
             'hashtags': [ht for ht, count in hashtag_counts.most_common(30)],
             'processed_texts': processed_texts
         }
+
+class TrendDataProcessor:
+    """process trend data"""
+    
+    def __init__(self):
+        self.preprocessor = TweetPreprocessor()
+    
+    def process_tweets(self, tweets_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """process tweets data"""
+        try:
+            if not tweets_data:
+                return self._empty_result()
+            
+            # use existing batch processing method
+            batch_results = self.preprocessor.batch_process_tweets(tweets_data)
+            
+            # calculate engagement metrics
+            total_engagement = 0
+            total_impressions = 0
+            
+            for tweet in tweets_data:
+                public_metrics = tweet.get('public_metrics', {})
+                engagement = (public_metrics.get('like_count', 0) + 
+                            public_metrics.get('retweet_count', 0) + 
+                            public_metrics.get('reply_count', 0) + 
+                            public_metrics.get('quote_count', 0))
+                total_engagement += engagement
+                
+                # estimate impressions (if no direct data)
+                estimated_impressions = engagement * 10  # simplified estimation
+                total_impressions += estimated_impressions
+            
+            # calculate average engagement
+            avg_engagement_rate = 0.0
+            if total_impressions > 0:
+                avg_engagement_rate = total_engagement / total_impressions
+            elif len(tweets_data) > 0:
+                avg_engagement_rate = total_engagement / len(tweets_data) / 100
+            
+            # calculate sentiment score (simplified version)
+            sentiment_score = self._calculate_sentiment_score(batch_results['processed_texts'])
+            
+            return {
+                'processed_tweets': tweets_data,
+                'total_tweets': len(tweets_data),
+                'total_engagement': total_engagement,
+                'total_impressions': total_impressions,
+                'avg_engagement_rate': avg_engagement_rate,
+                'sentiment_score': sentiment_score,
+                'all_keywords': batch_results['all_keywords'],
+                'pain_points': batch_results['pain_points'],
+                'questions': batch_results['questions'],
+                'hashtags': batch_results['hashtags'],
+                'processing_timestamp': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"process tweets data failed: {e}")
+            return self._empty_result()
+    
+    def _calculate_sentiment_score(self, processed_texts: List[str]) -> float:
+        """calculate sentiment score (simplified version)"""
+        try:
+            if not processed_texts:
+                return 0.5  # neutral
+            
+            positive_indicators = [
+                'good', 'great', 'awesome', 'amazing', 'love', 'like', 'best', 
+                'excellent', 'fantastic', 'wonderful', 'perfect', 'happy'
+            ]
+            
+            negative_indicators = [
+                'bad', 'terrible', 'awful', 'hate', 'worst', 'horrible', 
+                'disgusting', 'annoying', 'frustrated', 'angry', 'sad'
+            ]
+            
+            positive_count = 0
+            negative_count = 0
+            
+            for text in processed_texts:
+                text_lower = text.lower()
+                
+                for indicator in positive_indicators:
+                    if indicator in text_lower:
+                        positive_count += 1
+                        break
+                
+                for indicator in negative_indicators:
+                    if indicator in text_lower:
+                        negative_count += 1
+                        break
+            
+            total_sentiment_tweets = positive_count + negative_count
+            if total_sentiment_tweets == 0:
+                return 0.5  # neutral
+            
+            # return a score between 0-1, 0.5 is neutral
+            return positive_count / total_sentiment_tweets
+            
+        except Exception as e:
+            logger.error(f"calculate sentiment score failed: {e}")
+            return 0.5
+    
+    def _empty_result(self) -> Dict[str, Any]:
+        """return empty result"""
+        return {
+            'processed_tweets': [],
+            'total_tweets': 0,
+            'total_engagement': 0,
+            'total_impressions': 0,
+            'avg_engagement_rate': 0.0,
+            'sentiment_score': 0.5,
+            'all_keywords': [],
+            'pain_points': [],
+            'questions': [],
+            'hashtags': [],
+            'processing_timestamp': datetime.now().isoformat()
+        }
+    
+    def analyze_trend_momentum(self, tweets_data: List[Dict[str, Any]], 
+                             time_window_hours: int = 24) -> Dict[str, Any]:
+        """analyze trend momentum"""
+        try:
+            if not tweets_data:
+                return {'momentum_score': 0.0, 'trend_direction': 'stable'}
+            
+            # sort tweets by time
+            sorted_tweets = sorted(tweets_data, 
+                                 key=lambda x: x.get('created_at', ''))
+            
+            if len(sorted_tweets) < 2:
+                return {'momentum_score': 0.0, 'trend_direction': 'stable'}
+            
+            # calculate tweet distribution within time window
+            time_buckets = self._create_time_buckets(sorted_tweets, time_window_hours)
+            
+            # analyze trend direction
+            trend_direction = self._analyze_trend_direction(time_buckets)
+            momentum_score = self._calculate_momentum_score(time_buckets)
+            
+            return {
+                'momentum_score': momentum_score,
+                'trend_direction': trend_direction,
+                'time_buckets': time_buckets,
+                'analysis_timestamp': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"分析趋势动量失败: {e}")
+            return {'momentum_score': 0.0, 'trend_direction': 'stable'}
+    
+    def _create_time_buckets(self, tweets: List[Dict[str, Any]], 
+                           hours: int) -> List[Dict[str, Any]]:
+        """create time buckets for analysis"""
+        bucket_size = max(1, len(tweets) // 4)  # 分成4个时间段
+        buckets = []
+        
+        for i in range(0, len(tweets), bucket_size):
+            bucket_tweets = tweets[i:i + bucket_size]
+            total_engagement = sum(
+                tweet.get('public_metrics', {}).get('like_count', 0) +
+                tweet.get('public_metrics', {}).get('retweet_count', 0)
+                for tweet in bucket_tweets
+            )
+            
+            buckets.append({
+                'tweet_count': len(bucket_tweets),
+                'total_engagement': total_engagement,
+                'bucket_index': len(buckets)
+            })
+        
+        return buckets
+    
+    def _analyze_trend_direction(self, time_buckets: List[Dict[str, Any]]) -> str:
+        """analyze trend direction"""
+        if len(time_buckets) < 2:
+            return 'stable'
+        
+        first_bucket = time_buckets[0]
+        last_bucket = time_buckets[-1]
+        
+        first_activity = first_bucket['tweet_count'] + first_bucket['total_engagement']
+        last_activity = last_bucket['tweet_count'] + last_bucket['total_engagement']
+        
+        if last_activity > first_activity * 1.2:
+            return 'rising'
+        elif last_activity < first_activity * 0.8:
+            return 'declining'
+        else:
+            return 'stable'
+    
+    def _calculate_momentum_score(self, time_buckets: List[Dict[str, Any]]) -> float:
+        """calculate momentum score"""
+        if len(time_buckets) < 2:
+            return 0.0
+        
+        activities = [
+            bucket['tweet_count'] + bucket['total_engagement']
+            for bucket in time_buckets
+        ]
+        
+        if not activities or max(activities) == 0:
+            return 0.0
+        
+        # simplified momentum calculation
+        momentum = (activities[-1] - activities[0]) / max(activities)
+        return max(0.0, min(1.0, momentum + 0.5))

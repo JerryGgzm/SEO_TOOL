@@ -6,7 +6,8 @@ import logging
 from .base_repository import BaseRepository
 from ..models import AutomationRule
 
-
+import logging
+logger = logging.getLogger(__name__)
 
 class AutomationRepository(BaseRepository):
     """Repository for automation rules operations"""
