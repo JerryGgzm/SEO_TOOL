@@ -5,6 +5,7 @@ Flask-CORS==4.0.0
 # Database Related
 SQLAlchemy==2.0.21
 psycopg2-binary==2.9.7
+alembic==1.12.1
 
 # Data Validation
 pydantic==2.7.4
@@ -13,6 +14,8 @@ email-validator==2.0.0
 # Authentication Related
 PyJWT==2.8.0
 bcrypt==4.0.1
+passlib==1.7.4
+python-jose[cryptography]==3.3.0
 
 # OAuth Related
 requests-oauthlib==1.3.1
@@ -22,9 +25,10 @@ requests==2.31.0
 cryptography==41.0.7
 
 # Testing
-pytest==7.4.2
+pytest==7.4.3
 pytest-mock==3.11.1
 pytest-asyncio==0.21.1
+pytest-cov==4.1.0
 
 # Environment Variables
 python-dotenv==1.0.0
@@ -32,39 +36,45 @@ python-dotenv==1.0.0
 # Date/Time Handling
 python-dateutil==2.8.2
 
-# Twitter API specific dependencies
-requests==2.31.0
-requests-oauthlib==1.3.1
-
 # Rate limiting and caching
-redis==4.6.0  # Optional: for distributed rate limiting
+redis==5.0.1  # Optional: for distributed rate limiting
 
 # Async support (optional)
-aiohttp==3.8.5
 asyncio-throttle==1.0.2
+aiohttp==3.9.1  # For local LLM support
 
 # Monitoring and logging
-structlog==23.1.0
+structlog==23.2.0
 
 # Natural Language Processing
 nltk==3.8.1
 textblob==0.17.1
 vaderSentiment==3.3.2
-spacy==3.6.1
-
-# Optional: Advanced NLP models
-# python -m spacy download en_core_web_sm
+spacy==3.7.2  # Don't forget: python -m spacy download en_core_web_sm
 
 # Data processing and analysis
-numpy==1.24.3
+numpy==1.24.4
 scipy==1.11.1
 scikit-learn==1.3.0
-
-# Topic modeling (optional)
+pandas==2.1.3
 gensim==4.3.1
 
-# Async support
-aiohttp==3.8.5
+# Core web framework and database
+fastapi==0.104.1
+uvicorn==0.24.0
 
-# OpenAI for LLM insights (optional)
-openai==1.3.0
+# HTTP clients and API
+httpx==0.25.2
+python-multipart==0.0.6
+
+# LLM and AI
+openai==1.82.1
+anthropic==0.7.7
+
+# Development tools
+black==23.11.0
+flake8==6.1.0
+isort==5.12.0
+
+# Background tasks (optional, for future use)
+celery==5.3.4
