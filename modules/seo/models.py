@@ -3,6 +3,7 @@ from typing import List, Optional, Dict, Any, Union
 from pydantic import BaseModel, Field, field_validator, validator
 from datetime import datetime
 from enum import Enum
+from dataclasses import dataclass, field
 
 class SEOContentType(Enum):
     TWEET = "tweet"
@@ -86,20 +87,18 @@ class SEOOptimizationRequest(BaseModel):
     include_trending_tags: bool = Field(default=True)
     max_length: Optional[int] = Field(default=None)
 
-class SEOOptimizationResult(BaseModel):
-    """Result model for SEO optimization"""
-    original_content: str = Field(..., description="Original content")
-    optimized_content: str = Field(..., description="Optimized content")
-    optimization_score: float = Field(..., description="SEO optimization score (0-1)")
-    suggestions: List[str] = Field(default_factory=list, description="Applied optimization suggestions")
-    keywords_used: List[str] = Field(default_factory=list, description="Keywords used in optimization")
-    hashtags_suggested: List[str] = Field(default_factory=list, description="Hashtags suggested")
-    metrics: Dict[str, Any] = Field(default_factory=dict, description="Additional metrics")
-    
-    @validator('optimization_score')
-    def validate_score(cls, v):
-        """Ensure score is between 0 and 1"""
-        return max(0.0, min(1.0, v))
+@dataclass
+class SEOOptimizationResult:
+    """Result of SEO optimization process"""
+    original_content: str
+    optimized_content: str
+    optimization_score: float
+    improvements_made: List[str]
+    hashtag_analysis: List[str] = field(default_factory=list)
+    keyword_analysis: List[str] = field(default_factory=list)
+    estimated_reach_improvement: float = 0.0
+    suggestions: List[str] = field(default_factory=list)
+    optimization_metadata: Dict[str, Any] = field(default_factory=dict)
 
 class CompetitorHashtagAnalysis(BaseModel):
     """Competitor hashtag analysis"""

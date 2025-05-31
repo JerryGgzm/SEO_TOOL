@@ -1,338 +1,370 @@
 """SEO Module Service - Integration layer for system-wide SEO functionality"""
+"""Enhanced SEO Service with LLM Integration
+
+This service integrates the LLM-enhanced SEO optimizer into the existing service layer,
+providing intelligent content optimization for the content generation module.
+"""
+
 import asyncio
 from typing import List, Dict, Any, Optional
 import logging
 from datetime import datetime, timedelta, timezone
+import json
 
 from modules.twitter_api import TwitterAPIClient
 from modules.user_profile import UserProfileService
 from database import DataFlowManager
 
-from .optimizer import SEOOptimizer
-from .models import (
+# Import the enhanced optimizer
+from modules.seo.optimizer import SEOOptimizer, create_enhanced_seo_optimizer
+from modules.seo.models import (
     SEOOptimizationRequest, SEOAnalysisContext, SEOContentType,
-    SEOOptimizationLevel, HashtagStrategy, ContentOptimizationSuggestions,
-    SEOOptimizationResult
+    SEOOptimizationLevel, HashtagStrategy, ContentOptimizationSuggestions
 )
 
 logger = logging.getLogger(__name__)
 
 class SEOService:
     """
-    High-level SEO service for system integration
-    Provides SEO optimization functionality to other modules
+    Enhanced SEO service with LLM intelligence for system integration
     """
     
     def __init__(self, twitter_client: TwitterAPIClient,
                  user_service: UserProfileService,
                  data_flow_manager: DataFlowManager,
+                 llm_client=None,
                  config: Dict[str, Any] = None):
         
         self.twitter_client = twitter_client
         self.user_service = user_service
         self.data_flow_manager = data_flow_manager
+        self.llm_client = llm_client
         self.config = config or {}
         
-        # Initialize SEO optimizer
-        self.optimizer = SEOOptimizer(twitter_client, config)
+        # Initialize enhanced SEO optimizer with LLM
+        self.optimizer = create_enhanced_seo_optimizer(
+            twitter_client=twitter_client,
+            config=config,
+            llm_client=llm_client
+        )
         
         # Cache for optimization results
         self._optimization_cache = {}
         self._cache_duration = timedelta(hours=self.config.get('cache_duration_hours', 6))
+        
+        # LLM configuration
+        self.llm_enabled = llm_client is not None
+        self.default_optimization_mode = config.get('default_optimization_mode', 'hybrid') if config else 'hybrid'
     
     async def get_content_suggestions(self, trend_info: Dict[str, Any],
                                     product_info: Dict[str, Any],
                                     content_type: str) -> ContentOptimizationSuggestions:
         """
-        Get SEO suggestions for content generation (Called by ContentGenerationModule)
-        
-        Args:
-            trend_info: Information about the trend
-            product_info: User's product information
-            content_type: Type of content being generated
-            
-        Returns:
-            SEO optimization suggestions
+        Get intelligent SEO suggestions for content generation with LLM enhancement
         """
         try:
-            logger.info(f"Getting SEO suggestions for {content_type} content")
+            logger.info(f"Getting enhanced SEO suggestions for {content_type} content")
             
             # Convert content type string to enum
             seo_content_type = self._convert_content_type(content_type)
             
-            # Get suggestions from optimizer
-            suggestions = await self.optimizer.get_content_suggestions(
-                trend_info, product_info, seo_content_type
-            )
+            # Use enhanced optimizer's suggestion method (synchronous call)
+            if hasattr(self.optimizer, 'get_content_suggestions'):
+                suggestions = self.optimizer.get_content_suggestions(
+                    trend_info, product_info, seo_content_type
+                )
+            else:
+                # Fallback to basic suggestions
+                suggestions = ContentOptimizationSuggestions(
+                    recommended_hashtags=['innovation', 'business', 'growth'],
+                    primary_keywords=['productivity', 'professional'],
+                    secondary_keywords=['technology', 'digital'],
+                    semantic_keywords=[],
+                    trending_terms=['AI', 'automation'],
+                    optimal_length=280,
+                    call_to_action='What do you think?',
+                    timing_recommendation='Peak hours: 9-11 AM, 1-3 PM',
+                    engagement_tactics=['Ask questions', 'Share insights']
+                )
+            
+            # Add LLM-specific insights if available (but don't await the suggestions object)
+            if self.llm_enabled and hasattr(self.optimizer, 'llm_intelligence'):
+                try:
+                    # Create context for LLM enhancement
+                    context = SEOAnalysisContext(
+                        content_type=seo_content_type,
+                        target_audience=product_info.get('target_audience', 'professionals'),
+                        niche_keywords=trend_info.get('keywords', [])[:5],
+                        product_categories=[product_info.get('industry_category', 'technology')],
+                        industry_vertical=product_info.get('industry_category', 'technology')
+                    )
+                    
+                    # Get LLM-enhanced suggestions (this is the async call)
+                    if self.optimizer.llm_intelligence:
+                        llm_suggestions = await self.optimizer.llm_intelligence._generate_intelligent_seo_suggestions(
+                            "", "", context  # Empty content for general suggestions
+                        )
+                        
+                        # Merge suggestions (create new object, don't modify existing)
+                        suggestions = ContentOptimizationSuggestions(
+                            recommended_hashtags=llm_suggestions.recommended_hashtags or suggestions.recommended_hashtags,
+                            primary_keywords=llm_suggestions.primary_keywords or suggestions.primary_keywords,
+                            secondary_keywords=llm_suggestions.secondary_keywords or suggestions.secondary_keywords,
+                            semantic_keywords=getattr(llm_suggestions, 'semantic_keywords', []),
+                            trending_terms=llm_suggestions.trending_terms or suggestions.trending_terms,
+                            optimal_length=llm_suggestions.optimal_length or suggestions.optimal_length,
+                            call_to_action=llm_suggestions.call_to_action or suggestions.call_to_action,
+                            timing_recommendation=getattr(suggestions, 'timing_recommendation', ''),
+                            engagement_tactics=llm_suggestions.engagement_tactics or suggestions.engagement_tactics
+                        )
+                        
+                except Exception as e:
+                    logger.warning(f"LLM enhancement failed, using base suggestions: {e}")
             
             logger.info(f"Generated {len(suggestions.recommended_hashtags)} hashtag suggestions")
             return suggestions
             
         except Exception as e:
-            logger.error(f"Failed to get SEO content suggestions: {e}")
-            return ContentOptimizationSuggestions()
+            logger.error(f"Failed to get enhanced SEO content suggestions: {e}")
+            return ContentOptimizationSuggestions(
+                recommended_hashtags=['innovation', 'business', 'growth'],
+                primary_keywords=['productivity', 'professional'],
+                secondary_keywords=['technology', 'digital'],
+                semantic_keywords=[],
+                trending_terms=['AI', 'automation'],
+                optimal_length=280,
+                call_to_action='What do you think?',
+                timing_recommendation='Peak hours: 9-11 AM, 1-3 PM',
+                engagement_tactics=['Ask questions', 'Share insights']
+            )
     
-    def optimize_content(self, text: str, content_type: str, 
-                        context: Dict[str, Any] = None) -> str:
+    async def optimize_content_intelligent(self, text: str, content_type: str,
+                                         context: Dict[str, Any] = None,
+                                         optimization_mode: str = None) -> Dict[str, Any]:
         """
-        Optimize content for SEO (Called by ContentGenerationModule)
+        Intelligent content optimization using LLM-enhanced SEO
         
         Args:
             text: Content to optimize
             content_type: Type of content
             context: Additional context for optimization
+            optimization_mode: Specific optimization mode ('traditional', 'llm_enhanced', 'hybrid', 'intelligent')
             
         Returns:
-            Optimized content
+            Comprehensive optimization result with LLM insights
         """
         try:
             # Convert content type
             seo_content_type = self._convert_content_type(content_type)
             
-            # Use simple optimization for integration
-            optimized_text = self.optimizer.optimize_content_simple(
-                text, seo_content_type, context
-            )
-            
-            return optimized_text
-            
-        except Exception as e:
-            logger.error(f"Content optimization failed: {e}")
-            return text
-    
-    async def optimize_content_full(self, founder_id: str, content: str,
-                                  content_type: str, optimization_level: str = "moderate") -> Dict[str, Any]:
-        """
-        Full SEO optimization with detailed analysis
-        
-        Args:
-            founder_id: Founder's ID
-            content: Content to optimize
-            content_type: Type of content
-            optimization_level: Level of optimization
-            
-        Returns:
-            Complete optimization result
-        """
-        try:
-            # Build context from user profile
-            context = await self._build_seo_context(founder_id, content_type)
+            # Build SEO context
+            seo_context = await self._build_enhanced_seo_context(context, seo_content_type)
             
             # Create optimization request
             request = SEOOptimizationRequest(
-                content=content,
-                content_type=self._convert_content_type(content_type),
-                optimization_level=self._convert_optimization_level(optimization_level),
-                context=context
+                content=text,
+                content_type=seo_content_type,
+                optimization_level=SEOOptimizationLevel.MODERATE,
+                target_keywords=context.get('target_keywords', []) if context else [],
+                include_hashtags=True,
+                include_trending_tags=True
             )
             
-            # Perform optimization
-            result = await self.optimizer.optimize_content(request)
+            # Set optimization mode preference
+            if optimization_mode and hasattr(request, 'optimization_mode_preference'):
+                request.optimization_mode_preference = optimization_mode
+            elif optimization_mode:
+                # Store in config temporarily
+                self.optimizer.llm_config['llm_optimization_mode'] = optimization_mode
             
-            # Convert result to dictionary for API response
+            # Perform enhanced optimization - use the correct method based on mode
+            if optimization_mode in ['hybrid', 'llm_enhanced', 'intelligent'] and hasattr(self.optimizer, 'optimize_content_async'):
+                result = await self.optimizer.optimize_content_async(request, seo_context)
+            else:
+                # Use synchronous method for traditional optimization
+                result = self.optimizer.optimize_content(request, seo_context)
+            
+            # Convert result to service format
             return {
                 'original_content': result.original_content,
                 'optimized_content': result.optimized_content,
                 'optimization_score': result.optimization_score,
-                'improvements_made': result.improvements_made,
-                'hashtag_suggestions': [ht.hashtag for ht in result.hashtag_analysis],
-                'keyword_suggestions': [kw.keyword for kw in result.keyword_analysis],
+                'improvements_made': result.improvements_made or [],
+                'hashtag_suggestions': [ht.hashtag for ht in result.hashtag_analysis] if result.hashtag_analysis else [],
+                'keyword_suggestions': [kw.keyword for kw in result.keyword_analysis] if result.keyword_analysis else [],
                 'estimated_reach_improvement': result.estimated_reach_improvement,
-                'suggestions': {
-                    'recommended_hashtags': result.suggestions.recommended_hashtags,
-                    'primary_keywords': result.suggestions.primary_keywords,
-                    'engagement_tactics': result.suggestions.engagement_tactics,
-                    'optimal_length': result.suggestions.optimal_length,
-                    'call_to_action': result.suggestions.call_to_action
+                'llm_enhanced': result.optimization_metadata.get('llm_enhanced', False) if hasattr(result, 'optimization_metadata') and result.optimization_metadata else False,
+                'optimization_mode': optimization_mode or 'traditional',
+                'suggestions': result.suggestions if hasattr(result, 'suggestions') else [],
+                'metadata': {
+                    'optimization_timestamp': datetime.utcnow().isoformat(),
+                    'content_type': content_type,
+                    'context_used': bool(context),
+                    'llm_available': self.llm_enabled
                 }
             }
             
         except Exception as e:
-            logger.error(f"Full SEO optimization failed: {e}")
+            logger.error(f"Intelligent content optimization failed: {e}")
             return {
-                'original_content': content,
-                'optimized_content': content,
+                'original_content': text,
+                'optimized_content': text,
                 'optimization_score': 0.5,
+                'improvements_made': ['Optimization failed - using original content'],
+                'hashtag_suggestions': [],
+                'keyword_suggestions': [],
+                'estimated_reach_improvement': 0.0,
+                'llm_enhanced': False,
+                'optimization_mode': 'fallback',
+                'suggestions': ['Manual review recommended'],
+                'error': str(e),
+                'metadata': {
+                    'optimization_timestamp': datetime.utcnow().isoformat(),
+                    'content_type': content_type,
+                    'error': str(e)
+                }
+            }
+    
+    def optimize_content(self, text: str, content_type: str, 
+                        context: Dict[str, Any] = None) -> str:
+        """
+        Simple content optimization for backward compatibility
+        """
+        try:
+            # Use intelligent optimization but return only the optimized text
+            result = asyncio.run(self.optimize_content_intelligent(
+                text, content_type, context, 'hybrid'
+            ))
+            return result.get('optimized_content', text)
+            
+        except Exception as e:
+            logger.error(f"Simple content optimization failed: {e}")
+            return text
+    
+    async def optimize_for_trending_topics(self, founder_id: str, content: str,
+                                         trending_topics: List[str],
+                                         content_type: str = 'tweet') -> Dict[str, Any]:
+        """
+        Optimize content specifically for trending topics using LLM intelligence
+        """
+        try:
+            # Build context for trending optimization
+            context = await self._build_seo_context(founder_id, content_type)
+            
+            # Use enhanced optimizer's trending optimization
+            result = await self.optimizer.optimize_for_trending_topics(
+                content, trending_topics, context
+            )
+            
+            # Store optimization result for analytics
+            await self._store_trending_optimization_result(founder_id, result)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Trending topics optimization failed: {e}")
+            return {
+                'optimized_content': content,
+                'trend_integration': [],
                 'error': str(e)
             }
     
-    async def analyze_hashtag_performance(self, founder_id: str,
-                                        hashtags: List[str]) -> Dict[str, Any]:
+    async def generate_content_variations(self, founder_id: str, content: str,
+                                        content_type: str = 'tweet',
+                                        variation_count: int = 3) -> List[Dict[str, Any]]:
         """
-        Analyze performance of specific hashtags
-        
-        Args:
-            founder_id: Founder's ID
-            hashtags: List of hashtags to analyze
-            
-        Returns:
-            Hashtag performance analysis
+        Generate multiple SEO-optimized content variations using LLM
         """
         try:
-            # Get hashtag performance insights
-            insights = self.optimizer.hashtag_generator.get_hashtag_performance_insights(
-                hashtags, time_period_days=30
+            if not self.llm_enabled or not self.optimizer.llm_analyzer:
+                return [{'content': content, 'strategy': 'original', 'optimization_note': 'LLM not available'}]
+            
+            # Build context
+            context = await self._build_seo_context(founder_id, content_type)
+            
+            # Generate variations using LLM analyzer
+            variations = await self.optimizer.llm_analyzer.generate_content_variations(
+                content, context, variation_count
             )
             
-            # Store analysis results
-            self._store_hashtag_analysis(founder_id, hashtags, insights)
-            
-            return insights
-            
-        except Exception as e:
-            logger.error(f"Hashtag performance analysis failed: {e}")
-            return {}
-    
-    def get_trending_hashtags(self, niche_keywords: List[str],
-                            max_hashtags: int = 20) -> List[Dict[str, Any]]:
-        """
-        Get trending hashtags relevant to niche
-        
-        Args:
-            niche_keywords: Keywords related to user's niche
-            max_hashtags: Maximum number of hashtags to return
-            
-        Returns:
-            List of trending hashtag data
-        """
-        try:
-            # This would integrate with Twitter API to get real trending data
-            # For now, return simulated trending hashtags
-            
-            trending_hashtags = []
-            base_trending = ['ai', 'innovation', 'startup', 'tech', 'growth']
-            
-            # Add niche-specific trending
-            for keyword in niche_keywords[:3]:
-                base_trending.append(f"{keyword.lower()}tips")
-                base_trending.append(f"{keyword.lower()}trending")
-            
-            for hashtag in base_trending[:max_hashtags]:
-                trending_hashtags.append({
-                    'hashtag': hashtag,
-                    'usage_count': 1000 + len(hashtag) * 100,
-                    'growth_rate': 5.0 + (len(hashtag) % 5) * 2.0,
-                    'engagement_rate': 0.03 + (len(hashtag) % 3) * 0.01,
-                    'relevance_score': 0.8 if hashtag in niche_keywords else 0.6
-                })
-            
-            return trending_hashtags
-            
-        except Exception as e:
-            logger.error(f"Failed to get trending hashtags: {e}")
-            return []
-    
-    def generate_keyword_suggestions(self, founder_id: str, 
-                                   content_context: str = "",
-                                   max_keywords: int = 20) -> List[Dict[str, Any]]:
-        """
-        Generate keyword suggestions for founder
-        
-        Args:
-            founder_id: Founder's ID
-            content_context: Context for keyword generation
-            max_keywords: Maximum keywords to return
-            
-        Returns:
-            List of keyword suggestions with analysis
-        """
-        try:
-            # Get user profile for context
-            user_profile = self.user_service.get_user_profile(founder_id)
-            if not user_profile:
-                return []
-            
-            # Build analysis context
-            context = SEOAnalysisContext(
-                content_type=SEOContentType.TWEET,  # Default
-                niche_keywords=getattr(user_profile, 'niche_keywords', []),
-                target_audience=getattr(user_profile, 'target_audience', 'professionals'),
-                product_categories=[getattr(user_profile, 'industry_category', 'technology')]
-            )
-            
-            # Generate keyword suggestions
-            keywords = self.optimizer.keyword_analyzer.generate_keyword_suggestions(
-                context, max_keywords
-            )
-            
-            # Convert to response format
-            keyword_suggestions = []
-            for keyword in keywords:
-                # Get detailed analysis for each keyword
-                analysis = self.optimizer.keyword_analyzer._analyze_single_keyword(
-                    keyword, content_context, context
-                )
-                
-                if analysis:
-                    keyword_suggestions.append({
-                        'keyword': analysis.keyword,
-                        'search_volume': analysis.search_volume,
-                        'difficulty': analysis.difficulty.value,
-                        'relevance_score': analysis.relevance_score,
-                        'trending_status': analysis.trending_status,
-                        'suggested_usage': analysis.suggested_usage
+            # Enhance each variation with traditional SEO
+            enhanced_variations = []
+            for variation in variations:
+                try:
+                    # Apply traditional SEO to each variation
+                    optimized = await self.optimize_content_intelligent(
+                        variation.get('content', content),
+                        content_type,
+                        {'founder_id': founder_id},
+                        'traditional'  # Use traditional for variations to avoid over-processing
+                    )
+                    
+                    enhanced_variations.append({
+                        'original_variation': variation.get('content', content),
+                        'optimized_content': optimized.get('optimized_content', variation.get('content', content)),
+                        'strategy': variation.get('strategy', 'unknown'),
+                        'seo_focus': variation.get('seo_focus', 'general'),
+                        'expected_improvement': variation.get('expected_improvement', 'N/A'),
+                        'optimization_score': optimized.get('optimization_score', 0.5),
+                        'llm_generated': True
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to enhance variation: {e}")
+                    enhanced_variations.append({
+                        'original_variation': variation.get('content', content),
+                        'optimized_content': variation.get('content', content),
+                        'strategy': variation.get('strategy', 'unknown'),
+                        'error': str(e)
                     })
             
-            return keyword_suggestions
+            return enhanced_variations
             
         except Exception as e:
-            logger.error(f"Keyword suggestion generation failed: {e}")
-            return []
+            logger.error(f"Content variation generation failed: {e}")
+            return [{'content': content, 'error': str(e)}]
     
-    async def track_seo_performance(self, founder_id: str, 
-                                  content_id: str,
-                                  pre_metrics: Dict[str, float],
-                                  post_metrics: Dict[str, float]) -> bool:
+    async def analyze_content_seo_potential(self, content: str, founder_id: str,
+                                          content_type: str = 'tweet') -> Dict[str, Any]:
         """
-        Track SEO optimization performance
-        
-        Args:
-            founder_id: Founder's ID
-            content_id: Content identifier
-            pre_metrics: Metrics before optimization
-            post_metrics: Metrics after optimization
-            
-        Returns:
-            Success status
+        Analyze content's SEO potential using LLM intelligence
         """
         try:
-            # Calculate improvement
-            improvement = {}
-            for metric, post_value in post_metrics.items():
-                pre_value = pre_metrics.get(metric, 0)
-                if pre_value > 0:
-                    improvement[metric] = ((post_value - pre_value) / pre_value) * 100
-                else:
-                    improvement[metric] = 0
+            if not self.llm_enabled or not self.optimizer.llm_analyzer:
+                return self._basic_seo_potential_analysis(content)
             
-            # Store performance data
-            performance_data = {
-                'founder_id': founder_id,
-                'content_id': content_id,
-                'pre_optimization_metrics': pre_metrics,
-                'post_optimization_metrics': post_metrics,
-                'improvement_percentage': improvement.get('engagement_rate', 0),
-                'tracking_timestamp': datetime.utcnow().isoformat()
+            # Build context for analysis
+            context = await self._build_seo_context(founder_id, content_type)
+            
+            # Use LLM analyzer for comprehensive analysis
+            analysis = await self.optimizer.llm_analyzer.analyze_content_seo_potential(content, context)
+            
+            # Add traditional SEO metrics for comparison
+            traditional_analysis = self._basic_seo_potential_analysis(content)
+            
+            # Combine analyses
+            return {
+                'llm_analysis': analysis,
+                'traditional_analysis': traditional_analysis,
+                'combined_score': (analysis.get('seo_strength_score', 0.5) + traditional_analysis.get('seo_score', 0.5)) / 2,
+                'recommendations': analysis.get('improvement_recommendations', []),
+                'competitive_advantages': analysis.get('competitive_advantages', []),
+                'analysis_timestamp': datetime.utcnow().isoformat(),
+                'llm_enhanced': True
             }
             
-            # Save to database (would use actual repository)
-            self._store_performance_data(performance_data)
-            
-            return True
-            
         except Exception as e:
-            logger.error(f"SEO performance tracking failed: {e}")
-            return False
+            logger.error(f"SEO potential analysis failed: {e}")
+            return {
+                'llm_analysis': {},
+                'traditional_analysis': self._basic_seo_potential_analysis(content),
+                'error': str(e),
+                'llm_enhanced': False
+            }
     
-    def get_seo_recommendations(self, founder_id: str) -> Dict[str, Any]:
+    async def get_intelligent_seo_recommendations(self, founder_id: str,
+                                                content_history: List[str] = None) -> Dict[str, Any]:
         """
-        Get personalized SEO recommendations for founder
-        
-        Args:
-            founder_id: Founder's ID
-            
-        Returns:
-            SEO recommendations and insights
+        Get intelligent SEO recommendations based on founder's content history and LLM analysis
         """
         try:
             # Get user profile
@@ -340,60 +372,392 @@ class SEOService:
             if not user_profile:
                 return {}
             
-            # Get performance history
-            performance_history = self._get_performance_history(founder_id)
+            # Get traditional recommendations
+            base_recommendations = self.get_seo_recommendations(founder_id)
             
-            # Generate recommendations based on profile and performance
-            recommendations = {
-                'hashtag_strategy': self._recommend_hashtag_strategy(user_profile, performance_history),
-                'keyword_focus': self._recommend_keyword_focus(user_profile),
-                'content_optimization': self._recommend_content_optimization(performance_history),
-                'posting_schedule': self._recommend_posting_schedule(performance_history),
-                'engagement_tactics': self._recommend_engagement_tactics(performance_history)
+            # If LLM is available, enhance recommendations
+            if self.llm_enabled and content_history:
+                # Analyze content history patterns
+                llm_insights = await self._analyze_content_patterns_with_llm(
+                    content_history, founder_id
+                )
+                
+                # Merge recommendations
+                enhanced_recommendations = self._merge_recommendations(
+                    base_recommendations, llm_insights
+                )
+                
+                return {
+                    'traditional_recommendations': base_recommendations,
+                    'llm_insights': llm_insights,
+                    'enhanced_recommendations': enhanced_recommendations,
+                    'llm_enhanced': True,
+                    'analysis_timestamp': datetime.utcnow().isoformat()
+                }
+            
+            return {
+                'traditional_recommendations': base_recommendations,
+                'llm_enhanced': False
             }
             
-            return recommendations
+        except Exception as e:
+            logger.error(f"Intelligent SEO recommendations failed: {e}")
+            return {'error': str(e)}
+    
+    async def optimize_content_for_founder(self, founder_id: str, content: str,
+                                         content_type: str = 'tweet',
+                                         optimization_strategy: str = 'intelligent') -> Dict[str, Any]:
+        """
+        Optimize content specifically for a founder using their profile and LLM intelligence
+        """
+        try:
+            # Build founder-specific context
+            context = {
+                'founder_id': founder_id,
+                'content_type': content_type,
+                'optimization_strategy': optimization_strategy
+            }
+            
+            # Add founder's preferences and history
+            founder_context = await self._get_founder_optimization_context(founder_id)
+            context.update(founder_context)
+            
+            # Perform intelligent optimization
+            result = await self.optimize_content_intelligent(
+                content, content_type, context, optimization_strategy
+            )
+            
+            # Store optimization result for future learning
+            await self._store_founder_optimization_result(founder_id, result)
+            
+            return result
             
         except Exception as e:
-            logger.error(f"SEO recommendations generation failed: {e}")
+            logger.error(f"Founder-specific content optimization failed: {e}")
+            return {
+                'original_content': content,
+                'optimized_content': content,
+                'error': str(e),
+                'llm_enhanced': False
+            }
+    
+    # Helper methods
+    
+    async def _enhance_suggestions_with_llm_insights(self, suggestions: ContentOptimizationSuggestions,
+                                                   trend_info: Dict[str, Any],
+                                                   product_info: Dict[str, Any],
+                                                   seo_content_type: SEOContentType) -> ContentOptimizationSuggestions:
+        """
+        Enhance suggestions with LLM insights (don't await the suggestions parameter)
+        """
+        try:
+            # Convert content type
+            seo_content_type = self._convert_content_type_from_string(content_type) if isinstance(seo_content_type, str) else seo_content_type
+            
+            # Get base suggestions from optimizer (synchronous call)
+            if hasattr(self.optimizer, 'get_content_suggestions'):
+                base_suggestions = self.optimizer.get_content_suggestions(
+                    trend_info, product_info, seo_content_type
+                )
+            else:
+                # Use the passed suggestions as base
+                base_suggestions = suggestions
+            
+            # Enhance with LLM insights if available
+            enhanced_suggestions = base_suggestions
+            if self.llm_enabled and hasattr(self.optimizer, 'llm_intelligence'):
+                try:
+                    # Create context for LLM enhancement
+                    context = SEOAnalysisContext(
+                        content_type=seo_content_type,
+                        target_audience=product_info.get('target_audience', 'professionals'),
+                        niche_keywords=trend_info.get('keywords', [])[:5],
+                        product_categories=[product_info.get('industry_category', 'technology')],
+                        industry_vertical=product_info.get('industry_category', 'technology')
+                    )
+                    
+                    # Get LLM-enhanced suggestions (this is the async call)
+                    if self.optimizer.llm_intelligence:
+                        llm_suggestions = await self.optimizer.llm_intelligence._generate_intelligent_seo_suggestions(
+                            "", "", context  # Empty content for general suggestions
+                        )
+                        
+                        # Merge suggestions
+                        enhanced_suggestions = ContentOptimizationSuggestions(
+                            recommended_hashtags=llm_suggestions.recommended_hashtags or base_suggestions.recommended_hashtags,
+                            primary_keywords=llm_suggestions.primary_keywords or base_suggestions.primary_keywords,
+                            secondary_keywords=llm_suggestions.secondary_keywords or base_suggestions.secondary_keywords,
+                            semantic_keywords=getattr(llm_suggestions, 'semantic_keywords', []),
+                            trending_terms=llm_suggestions.trending_terms or base_suggestions.trending_terms,
+                            optimal_length=llm_suggestions.optimal_length or base_suggestions.optimal_length,
+                            call_to_action=llm_suggestions.call_to_action or base_suggestions.call_to_action,
+                            timing_recommendation=getattr(base_suggestions, 'timing_recommendation', ''),
+                            engagement_tactics=llm_suggestions.engagement_tactics or base_suggestions.engagement_tactics
+                        )
+                        
+                except Exception as e:
+                    logger.warning(f"LLM enhancement failed, using base suggestions: {e}")
+            
+            return enhanced_suggestions
+            
+        except Exception as e:
+            logger.error(f"Failed to enhance suggestions with LLM insights: {e}")
+            # Return safe fallback
+            return ContentOptimizationSuggestions(
+                recommended_hashtags=['innovation', 'business', 'growth'],
+                primary_keywords=['productivity', 'professional'],
+                secondary_keywords=['technology', 'digital'],
+                semantic_keywords=[],
+                trending_terms=['AI', 'automation'],
+                optimal_length=280,
+                call_to_action='What do you think?',
+                timing_recommendation='Peak hours: 9-11 AM, 1-3 PM',
+                engagement_tactics=['Ask questions', 'Share insights']
+            )
+    
+    async def _build_enhanced_seo_context(self, context: Dict[str, Any],
+                                        content_type: SEOContentType) -> SEOAnalysisContext:
+        """Build enhanced SEO context with additional intelligence"""
+        
+        # Build base context
+        base_context = await self._build_seo_context(
+            context.get('founder_id') if context else None,
+            content_type.value
+        )
+        
+        # Add LLM-specific enhancements
+        if context:
+            # Add trending context if available
+            if 'trending_topics' in context:
+                base_context.trend_context = {
+                    'keywords': context['trending_topics'],
+                    'focus': 'trending_optimization'
+                }
+            
+            # Add optimization strategy preferences
+            if 'optimization_strategy' in context:
+                base_context.brand_voice = base_context.brand_voice or {}
+                base_context.brand_voice['optimization_preference'] = context['optimization_strategy']
+        
+        return base_context
+    
+    async def _analyze_content_patterns_with_llm(self, content_history: List[str],
+                                               founder_id: str) -> Dict[str, Any]:
+        """Analyze content patterns using LLM to generate insights"""
+        
+        if not self.llm_enabled or not content_history:
             return {}
+        
+        try:
+            # Sample recent content to avoid token limits
+            recent_content = content_history[-10:] if len(content_history) > 10 else content_history
+            content_sample = "\n".join(recent_content)
+            
+            # Create analysis prompt
+            analysis_prompt = f"""
+                Analyze this founder's content history and provide strategic SEO insights.
+
+                Recent Content History:
+                {content_sample}
+
+                Provide analysis in JSON format:
+                {{
+                    "content_patterns": {{
+                        "common_themes": ["theme1", "theme2"],
+                        "writing_style": "description",
+                        "hashtag_patterns": ["pattern1", "pattern2"],
+                        "engagement_elements": ["element1", "element2"]
+                    }},
+                    "seo_opportunities": {{
+                        "underutilized_keywords": ["keyword1", "keyword2"],
+                        "hashtag_gaps": ["hashtag1", "hashtag2"],
+                        "content_gaps": ["gap1", "gap2"]
+                    }},
+                    "recommendations": {{
+                        "keyword_strategy": "specific recommendation",
+                        "hashtag_strategy": "specific recommendation",
+                        "content_optimization": "specific recommendation",
+                        "engagement_tactics": ["tactic1", "tactic2"]
+                    }},
+                    "performance_predictions": {{
+                        "high_potential_topics": ["topic1", "topic2"],
+                        "optimal_posting_strategy": "recommendation"
+                    }}
+                }}
+                """
+            
+            # Call LLM
+            if self.optimizer.llm_analyzer:
+                response = await self.optimizer.llm_analyzer._call_llm(analysis_prompt)
+                return json.loads(response)
+            
+            return {}
+            
+        except Exception as e:
+            logger.error(f"LLM content pattern analysis failed: {e}")
+            return {}
+    
+    def _merge_recommendations(self, traditional: Dict[str, Any],
+                             llm_insights: Dict[str, Any]) -> Dict[str, Any]:
+        """Merge traditional and LLM recommendations"""
+        
+        merged = traditional.copy()
+        
+        # Add LLM-specific insights
+        if 'seo_opportunities' in llm_insights:
+            merged['llm_opportunities'] = llm_insights['seo_opportunities']
+        
+        if 'recommendations' in llm_insights:
+            merged['llm_recommendations'] = llm_insights['recommendations']
+        
+        if 'performance_predictions' in llm_insights:
+            merged['performance_predictions'] = llm_insights['performance_predictions']
+        
+        # Enhance existing recommendations with LLM insights
+        llm_recs = llm_insights.get('recommendations', {})
+        
+        if 'hashtag_strategy' in merged and 'hashtag_strategy' in llm_recs:
+            merged['enhanced_hashtag_strategy'] = {
+                'traditional': merged['hashtag_strategy'],
+                'llm_insight': llm_recs['hashtag_strategy'],
+                'combined_approach': f"{merged['hashtag_strategy']['recommendation']} Additionally, {llm_recs['hashtag_strategy']}"
+            }
+        
+        return merged
+    
+    async def _get_founder_optimization_context(self, founder_id: str) -> Dict[str, Any]:
+        """Get founder-specific optimization context"""
+        
+        try:
+            # Get user profile
+            user_profile = self.user_service.get_user_profile(founder_id)
+            
+            # Get optimization history
+            optimization_history = await self._get_optimization_history(founder_id)
+            
+            # Get successful content patterns
+            successful_patterns = await self._get_successful_content_patterns(founder_id)
+            
+            context = {
+                'user_profile': user_profile,
+                'optimization_history': optimization_history,
+                'successful_patterns': successful_patterns,
+                'target_keywords': await self._get_founder_keywords(founder_id)
+            }
+            
+            return context
+            
+        except Exception as e:
+            logger.error(f"Failed to get founder optimization context: {e}")
+            return {}
+    
+    async def _store_founder_optimization_result(self, founder_id: str,
+                                               result: Dict[str, Any]) -> None:
+        """Store optimization result for future learning"""
+        
+        try:
+            optimization_data = {
+                'founder_id': founder_id,
+                'original_content': result.get('original_content'),
+                'optimized_content': result.get('optimized_content'),
+                'optimization_score': result.get('optimization_score'),
+                'optimization_mode': result.get('optimization_mode'),
+                'llm_enhanced': result.get('llm_enhanced', False),
+                'llm_insights': result.get('llm_insights', {}),
+                'optimization_timestamp': datetime.now(timezone.utc).isoformat()
+            }
+            
+            # Store using data flow manager
+            self.data_flow_manager.store_seo_optimization_result(founder_id, optimization_data)
+            
+        except Exception as e:
+            logger.error(f"Failed to store founder optimization result: {e}")
+    
+    async def _store_trending_optimization_result(self, founder_id: str,
+                                                result: Dict[str, Any]) -> None:
+        """Store trending optimization result"""
+        
+        try:
+            trending_data = {
+                'founder_id': founder_id,
+                'trending_topics': result.get('trend_integration', []),
+                'optimized_content': result.get('optimized_content'),
+                'optimization_score': result.get('optimization_score'),
+                'llm_insights': result.get('llm_insights', {}),
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
+            
+            # Store trending optimization data
+            self.data_flow_manager.store_trending_optimization_result(founder_id, trending_data)
+            
+        except Exception as e:
+            logger.error(f"Failed to store trending optimization result: {e}")
+    
+    # Utility methods from base class
+    
+    def _convert_content_type(self, content_type: str) -> SEOContentType:
+        """Convert string content type to enum"""
+        try:
+            if isinstance(content_type, str):
+                content_str = content_type.lower().strip()
+            else:
+                content_str = str(content_type).lower().strip()
+            
+            content_str = content_str.replace('contenttype.', '').replace('seocontenttype.', '')
+            
+            mapping = {
+                'tweet': SEOContentType.TWEET,
+                'reply': SEOContentType.TWEET,  # Map reply to tweet for now
+                'thread': SEOContentType.TWEET,  # Map thread to tweet for now
+                'quote_tweet': SEOContentType.TWEET,  # Map quote_tweet to tweet for now
+                'linkedin_post': SEOContentType.LINKEDIN_POST,
+                'facebook_post': SEOContentType.FACEBOOK_POST,
+                'blog_post': SEOContentType.BLOG_POST
+            }
+            
+            return mapping.get(content_str, SEOContentType.TWEET)
+                
+        except Exception as e:
+            logger.error(f"Content type conversion failed for '{content_type}': {str(e)}")
+            return SEOContentType.TWEET
     
     async def _build_seo_context(self, founder_id: str, content_type: str) -> SEOAnalysisContext:
         """Build SEO analysis context from user profile"""
         try:
-            # Get user profile
+            if not founder_id:
+                return SEOAnalysisContext(
+                    content_type=self._convert_content_type(content_type),
+                    target_audience='professionals',
+                    niche_keywords=[],
+                    product_categories=['technology'],
+                    industry_vertical='technology'
+                )
+            
             user_profile = self.user_service.get_user_profile(founder_id)
             
             if not user_profile:
                 return SEOAnalysisContext(
                     content_type=self._convert_content_type(content_type),
-                    target_audience='professionals',  # Default value
+                    target_audience='professionals',
                     niche_keywords=[],
-                    product_categories=['technology'],  # Default value
-                    industry_vertical='technology'  # Default value
+                    product_categories=['technology'],
+                    industry_vertical='technology'
                 )
             
-            # Extract relevant information with proper string conversion
+            # Extract information safely
             niche_keywords = []
             if hasattr(user_profile, 'niche_keywords'):
                 raw_keywords = user_profile.niche_keywords
-                if raw_keywords and not isinstance(raw_keywords, type(user_profile)):  # Not a mock
+                if raw_keywords and not isinstance(raw_keywords, type(user_profile)):
                     niche_keywords = [str(kw) for kw in raw_keywords if kw]
-            elif hasattr(user_profile, 'product_info'):
-                product_info = user_profile.product_info
-                if hasattr(product_info, 'core_values'):
-                    raw_values = product_info.core_values
-                    if raw_values and not isinstance(raw_values, type(user_profile)):  # Not a mock
-                        niche_keywords = [str(val) for val in raw_values if val]
             
-            # Convert mock objects to strings safely
-            target_audience = 'professionals'  # Default
+            target_audience = 'professionals'
             if hasattr(user_profile, 'target_audience'):
                 raw_audience = user_profile.target_audience
                 if raw_audience and not str(raw_audience).startswith('<MagicMock'):
                     target_audience = str(raw_audience)
             
-            industry = 'technology'  # Default
+            industry = 'technology'
             if hasattr(user_profile, 'industry_category'):
                 raw_industry = user_profile.industry_category
                 if raw_industry and not str(raw_industry).startswith('<MagicMock'):
@@ -409,7 +773,6 @@ class SEOService:
             
         except Exception as e:
             logger.error(f"Failed to build SEO context: {str(e)}")
-            # Return safe default context
             return SEOAnalysisContext(
                 content_type=self._convert_content_type(content_type),
                 target_audience='professionals',
@@ -418,8 +781,125 @@ class SEOService:
                 industry_vertical='technology'
             )
     
-    def _convert_content_type(self, content_type: str) -> SEOContentType:
-        """Convert string content type to enum"""
+    def _basic_seo_potential_analysis(self, content: str) -> Dict[str, Any]:
+        """Basic SEO potential analysis when LLM unavailable"""
+        
+        word_count = len(content.split())
+        char_count = len(content)
+        hashtag_count = len([word for word in content.split() if word.startswith('#')])
+        
+        # Simple scoring
+        seo_score = 0.5
+        if 50 <= char_count <= 250:
+            seo_score += 0.2
+        if hashtag_count > 0:
+            seo_score += 0.1
+        if '?' in content:
+            seo_score += 0.1
+        if any(word in content.lower() for word in ['help', 'tips', 'how', 'guide']):
+            seo_score += 0.1
+        
+        return {
+            'seo_score': min(1.0, seo_score),
+            'word_count': word_count,
+            'char_count': char_count,
+            'hashtag_count': hashtag_count,
+            'has_question': '?' in content,
+            'has_call_to_action': any(word in content.lower() for word in ['share', 'comment', 'like', 'follow'])
+        }
+    
+    async def _get_optimization_history(self, founder_id: str) -> List[Dict[str, Any]]:
+        """Get founder's optimization history"""
+        try:
+            return self.data_flow_manager.get_seo_performance_history(founder_id, 30)
+        except Exception as e:
+            logger.error(f"Failed to get optimization history: {e}")
+            return []
+    
+    async def _get_successful_content_patterns(self, founder_id: str) -> List[Dict[str, Any]]:
+        """Get founder's successful content patterns"""
+        try:
+            # This would analyze high-performing content
+            return []
+        except Exception as e:
+            logger.error(f"Failed to get successful patterns: {e}")
+            return []
+    
+    async def _get_founder_keywords(self, founder_id: str) -> List[str]:
+        """Get founder-specific keywords"""
+        try:
+            user_profile = self.user_service.get_user_profile(founder_id)
+            if user_profile and hasattr(user_profile, 'niche_keywords'):
+                return [str(kw) for kw in user_profile.niche_keywords if kw]
+            return []
+        except Exception as e:
+            logger.error(f"Failed to get founder keywords: {e}")
+            return []
+    
+    # Backward compatibility methods
+    
+    def get_seo_recommendations(self, founder_id: str) -> Dict[str, Any]:
+        """Get basic SEO recommendations (backward compatibility)"""
+        try:
+            user_profile = self.user_service.get_user_profile(founder_id)
+            performance_history = self.data_flow_manager.get_seo_performance_history(founder_id, 30)
+            
+            return {
+                'hashtag_strategy': {
+                    'recommended_strategy': 'engagement_optimized',
+                    'recommendation': 'Focus on engagement-optimized hashtags',
+                    'max_hashtags_per_post': 5
+                },
+                'keyword_focus': {
+                    'primary_focus_keywords': ['innovation', 'technology', 'business'],
+                    'keyword_density_target': 0.02,
+                    'recommendation': 'Focus on industry keywords for better targeting'
+                },
+                'content_optimization': {
+                    'focus_area': 'engagement_elements',
+                    'recommendation': 'Add more questions and calls-to-action',
+                    'target_optimization_score': 0.8
+                }
+            }
+        except Exception as e:
+            logger.error(f"Failed to get SEO recommendations: {e}")
+            return {}
+    
+    def get_seo_analytics_summary(self, founder_id: str, days: int = 30) -> Dict[str, Any]:
+        """Get SEO analytics summary with LLM enhancements"""
+        try:
+            # Get base analytics
+            performance_data = self.data_flow_manager.get_seo_performance_history(founder_id, days)
+            
+            if not performance_data:
+                return {
+                    'total_optimizations': 0,
+                    'avg_optimization_score': 0.0,
+                    'llm_enhanced': self.llm_enabled
+                }
+            
+            # Calculate enhanced analytics
+            total_optimizations = len(performance_data)
+            llm_enhanced_count = sum(1 for p in performance_data if p.get('llm_enhanced', False))
+            avg_score = sum(p.get('optimization_score', 0) for p in performance_data) / total_optimizations
+            
+            return {
+                'total_optimizations': total_optimizations,
+                'avg_optimization_score': round(avg_score, 2),
+                'llm_enhanced_count': llm_enhanced_count,
+                'llm_enhancement_rate': round(llm_enhanced_count / total_optimizations, 2) if total_optimizations > 0 else 0,
+                'best_performing_hashtags': ['innovation', 'startup', 'growth'],
+                'optimization_trend': 'improving' if avg_score > 0.7 else 'needs_improvement',
+                'llm_enabled': self.llm_enabled,
+                'analysis_period_days': days
+            }
+            
+        except Exception as e:
+            logger.error(f"SEO analytics summary generation failed: {e}")
+            return {'error': str(e), 'llm_enhanced': False}
+
+    def _convert_content_type_from_string(self, content_type: str) -> SEOContentType:
+        """Convert string content type to SEOContentType enum"""
         try:
             # Handle string inputs
             if isinstance(content_type, str):
@@ -448,272 +928,127 @@ class SEOService:
         except Exception as e:
             logger.error(f"Content type conversion failed for '{content_type}': {str(e)}")
             return SEOContentType.TWEET
-    
-    def _convert_optimization_level(self, level: str) -> SEOOptimizationLevel:
-        """Convert string optimization level to enum"""
-        mapping = {
-            'basic': SEOOptimizationLevel.BASIC,
-            'moderate': SEOOptimizationLevel.MODERATE,
-            'aggressive': SEOOptimizationLevel.AGGRESSIVE
-        }
-        return mapping.get(level.lower(), SEOOptimizationLevel.MODERATE)
-    
-    def _store_hashtag_analysis(self, founder_id: str, hashtags: List[str], 
-                              insights: Dict[str, Any]) -> None:
-        """Store hashtag analysis results"""
-        try:
-            # In a real implementation, this would store to database
-            analysis_data = {
-                'founder_id': founder_id,
-                'hashtags': hashtags,
-                'insights': insights,
-                'analysis_timestamp': datetime.utcnow().isoformat()
-            }
-            
-            # Store using data flow manager or direct database access
-            logger.info(f"Stored hashtag analysis for founder {founder_id}")
-            
-        except Exception as e:
-            logger.error(f"Failed to store hashtag analysis: {e}")
-    
-    def _store_performance_data(self, performance_data: Dict[str, Any]) -> None:
-        """Store SEO performance data"""
-        try:
-            # In a real implementation, this would store to database
-            logger.info(f"Stored SEO performance data for content {performance_data['content_id']}")
-            
-        except Exception as e:
-            logger.error(f"Failed to store performance data: {e}")
-    
-    def _get_performance_history(self, founder_id: str) -> List[Dict[str, Any]]:
-        """Get performance history for founder"""
-        try:
-            # In a real implementation, this would query database
-            # Return simulated performance history
-            return [
-                {
-                    'content_id': 'content_1',
-                    'optimization_score': 0.8,
-                    'engagement_improvement': 25.0,
-                    'reach_improvement': 30.0,
-                    'timestamp': (datetime.utcnow() - timedelta(days=7)).isoformat()
-                },
-                {
-                    'content_id': 'content_2', 
-                    'optimization_score': 0.7,
-                    'engagement_improvement': 15.0,
-                    'reach_improvement': 20.0,
-                    'timestamp': (datetime.utcnow() - timedelta(days=14)).isoformat()
-                }
-            ]
-            
-        except Exception as e:
-            logger.error(f"Failed to get performance history: {e}")
-            return []
-    
-    def _recommend_hashtag_strategy(self, user_profile: Any, 
-                                  performance_history: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Recommend hashtag strategy based on profile and performance"""
-        # Analyze performance to recommend strategy
-        avg_performance = 0.0
-        if performance_history:
-            avg_performance = sum(p.get('engagement_improvement', 0) for p in performance_history) / len(performance_history)
-        
-        if avg_performance < 10:
-            strategy = "engagement_optimized"
-            recommendation = "Focus on engagement-optimized hashtags to improve interaction rates"
-        elif avg_performance < 20:
-            strategy = "trending_focus" 
-            recommendation = "Leverage trending hashtags for better discovery"
-        else:
-            strategy = "niche_specific"
-            recommendation = "Continue with niche-specific hashtags for targeted audience"
-        
-        return {
-            'recommended_strategy': strategy,
-            'explanation': recommendation,
-            'max_hashtags_per_post': 5
-        }
-    
-    def _recommend_keyword_focus(self, user_profile: Any) -> Dict[str, Any]:
-        """Recommend keyword focus areas"""
-        # Extract industry from profile
-        industry = getattr(user_profile, 'industry_category', 'technology')
-        
-        keyword_focuses = {
-            'technology': ['innovation', 'automation', 'digital transformation'],
-            'marketing': ['growth', 'conversion', 'brand awareness'],
-            'finance': ['investment', 'financial planning', 'fintech'],
-            'healthcare': ['wellness', 'medical technology', 'patient care'],
-            'education': ['learning', 'skills development', 'online education']
-        }
-        
-        focus_keywords = keyword_focuses.get(industry.lower(), ['business', 'growth', 'success'])
-        
-        return {
-            'primary_focus_keywords': focus_keywords,
-            'keyword_density_target': 0.02,
-            'recommendation': f"Focus on {industry} industry keywords for better niche targeting"
-        }
-    
-    def _recommend_content_optimization(self, performance_history: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Recommend content optimization approaches"""
-        # Analyze what works best
-        high_performing = [p for p in performance_history if p.get('optimization_score', 0) > 0.7]
-        
-        if len(high_performing) < len(performance_history) * 0.5:
-            return {
-                'focus_area': 'engagement_elements',
-                'recommendation': 'Add more questions and call-to-actions to improve engagement',
-                'target_optimization_score': 0.8
-            }
-        else:
-            return {
-                'focus_area': 'advanced_optimization',
-                'recommendation': 'Focus on advanced keyword integration and platform-specific optimization',
-                'target_optimization_score': 0.9
-            }
-    
-    def _recommend_posting_schedule(self, performance_history: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Recommend optimal posting schedule"""
-        return {
-            'optimal_times': ['9:00 AM', '1:00 PM', '7:00 PM'],
-            'optimal_days': ['Tuesday', 'Wednesday', 'Thursday'],
-            'frequency': 'Daily posting with 2-3 optimized posts per day',
-            'recommendation': 'Post during peak engagement hours for maximum visibility'
-        }
-    
-    def _recommend_engagement_tactics(self, performance_history: List[Dict[str, Any]]) -> List[str]:
-        """Recommend engagement tactics"""
-        return [
-            "Ask questions to encourage replies",
-            "Use numbers and statistics to grab attention", 
-            "Include clear call-to-actions",
-            "Share personal insights and experiences",
-            "Use trending hashtags strategically",
-            "Respond quickly to comments and mentions"
-        ]
-    
-    def get_seo_analytics_summary(self, founder_id: str, days: int = 30) -> Dict[str, Any]:
+
+    async def get_enhanced_content_suggestions(self, trend_info: Dict[str, Any],
+                                             product_info: Dict[str, Any],
+                                             content_type: str) -> Dict[str, Any]:
         """
-        Get SEO analytics summary for founder
+        Get enhanced content suggestions with LLM integration
         
         Args:
-            founder_id: Founder's ID
-            days: Number of days to analyze
+            trend_info: Information about current trends
+            product_info: Product/service information
+            content_type: Type of content to optimize for
             
         Returns:
-            SEO analytics summary
+            Enhanced content suggestions with LLM insights
         """
         try:
-            # Get performance data from database
-            performance_data = self._get_performance_history(founder_id)
+            # Convert content type
+            seo_content_type = self._convert_content_type_from_string(content_type)
             
-            if not performance_data:
-                return {
-                    'total_optimizations': 0,
-                    'avg_optimization_score': 0.0,
-                    'avg_engagement_improvement': 0.0,
-                    'best_performing_hashtags': [],
-                    'recommendations': []
+            # Get base suggestions from optimizer
+            if hasattr(self.optimizer, 'get_content_suggestions_async'):
+                suggestions = await self.optimizer.get_content_suggestions_async(
+                    trend_info, product_info, seo_content_type
+                )
+            else:
+                # Fallback to sync method
+                suggestions = self.optimizer.get_content_suggestions(
+                    trend_info, product_info, seo_content_type
+                )
+            
+            # Enhance with LLM insights if available
+            enhanced_suggestions = suggestions
+            if self.llm_enabled and hasattr(self.optimizer, 'llm_intelligence'):
+                try:
+                    # Create context for LLM enhancement
+                    context = SEOAnalysisContext(
+                        content_type=seo_content_type,
+                        target_audience=product_info.get('target_audience', 'professionals'),
+                        niche_keywords=trend_info.get('keywords', [])[:5],
+                        product_categories=[product_info.get('industry_category', 'technology')],
+                        industry_vertical=product_info.get('industry_category', 'technology')
+                    )
+                    
+                    # Get LLM-enhanced suggestions
+                    if self.optimizer.llm_intelligence:
+                        llm_suggestions = await self.optimizer.llm_intelligence._generate_intelligent_seo_suggestions(
+                            "", "", context  # Empty content for general suggestions
+                        )
+                        
+                        # Merge suggestions
+                        enhanced_suggestions = ContentOptimizationSuggestions(
+                            recommended_hashtags=llm_suggestions.recommended_hashtags or suggestions.recommended_hashtags,
+                            primary_keywords=llm_suggestions.primary_keywords or suggestions.primary_keywords,
+                            secondary_keywords=llm_suggestions.secondary_keywords or suggestions.secondary_keywords,
+                            semantic_keywords=getattr(llm_suggestions, 'semantic_keywords', []),
+                            trending_terms=llm_suggestions.trending_terms or suggestions.trending_terms,
+                            optimal_length=llm_suggestions.optimal_length or suggestions.optimal_length,
+                            call_to_action=llm_suggestions.call_to_action or suggestions.call_to_action,
+                            timing_recommendation=getattr(suggestions, 'timing_recommendation', ''),
+                            engagement_tactics=llm_suggestions.engagement_tactics or suggestions.engagement_tactics
+                        )
+                        
+                except Exception as e:
+                    logger.warning(f"LLM enhancement failed, using base suggestions: {e}")
+            
+            # Convert to service format
+            return {
+                'recommended_hashtags': enhanced_suggestions.recommended_hashtags or [],
+                'primary_keywords': enhanced_suggestions.primary_keywords or [],
+                'secondary_keywords': enhanced_suggestions.secondary_keywords or [],
+                'semantic_keywords': getattr(enhanced_suggestions, 'semantic_keywords', []),
+                'trending_terms': enhanced_suggestions.trending_terms or [],
+                'optimal_length': enhanced_suggestions.optimal_length or 280,
+                'call_to_action': enhanced_suggestions.call_to_action or '',
+                'timing_recommendation': getattr(enhanced_suggestions, 'timing_recommendation', ''),
+                'engagement_tactics': enhanced_suggestions.engagement_tactics or [],
+                'llm_enhanced': self.llm_enabled,
+                'content_type': content_type,
+                'trend_alignment': {
+                    'trending_topics': trend_info.get('keywords', [])[:3],
+                    'pain_points': trend_info.get('pain_points', [])[:3],
+                    'opportunities': trend_info.get('opportunities', [])[:3]
+                },
+                'product_alignment': {
+                    'core_values': product_info.get('core_values', [])[:3],
+                    'target_audience': product_info.get('target_audience', 'professionals'),
+                    'industry_category': product_info.get('industry_category', 'technology')
                 }
-            
-            # Calculate summary metrics
-            total_optimizations = len(performance_data)
-            avg_optimization_score = sum(p.get('optimization_score', 0) for p in performance_data) / total_optimizations
-            avg_engagement_improvement = sum(p.get('engagement_improvement', 0) for p in performance_data) / total_optimizations
-            
-            # Get best performing hashtags (would be from actual data)
-            best_hashtags = ['innovation', 'startup', 'growth', 'tech', 'productivity']
-            
-            # Generate recommendations
-            recommendations = self.get_seo_recommendations(founder_id)
-            
-            return {
-                'total_optimizations': total_optimizations,
-                'avg_optimization_score': round(avg_optimization_score, 2),
-                'avg_engagement_improvement': round(avg_engagement_improvement, 1),
-                'avg_reach_improvement': round(sum(p.get('reach_improvement', 0) for p in performance_data) / total_optimizations, 1),
-                'best_performing_hashtags': best_hashtags,
-                'optimization_trend': 'improving' if avg_optimization_score > 0.7 else 'needs_improvement',
-                'recommendations': recommendations,
-                'analysis_period_days': days
             }
             
         except Exception as e:
-            logger.error(f"SEO analytics summary generation failed: {e}")
-            return {}
-    
-    def clear_optimization_cache(self) -> None:
-        """Clear optimization cache"""
-        self._optimization_cache.clear()
-        logger.info("SEO optimization cache cleared")
-    
-    async def optimize_content_for_founder(self, founder_id: str, content: str, 
-                                         content_type: str = 'tweet') -> Dict[str, Any]:
-        """Optimize content for a specific founder"""
-        try:
-            # Convert string content_type to enum
-            seo_content_type = SEOContentType.TWEET
-            if content_type.lower() == 'linkedin_post':
-                seo_content_type = SEOContentType.LINKEDIN_POST
-            elif content_type.lower() == 'facebook_post':
-                seo_content_type = SEOContentType.FACEBOOK_POST
-            elif content_type.lower() == 'blog_post':
-                seo_content_type = SEOContentType.BLOG_POST
-            
-            # Get founder's preferences for keywords
-            founder_keywords = await self._get_founder_keywords(founder_id)
-            
-            # Optimize content
-            result = self.optimizer.optimize_content(
-                content=content,
-                content_type=seo_content_type,
-                target_keywords=founder_keywords
-            )
-            
-            # Store optimization result
-            await self._store_optimization_result(founder_id, result)
-            
-            # Return as dictionary
+            logger.error(f"Failed to get enhanced SEO content suggestions: {e}")
+            # Return safe fallback
             return {
-                'original_content': result.original_content,
-                'optimized_content': result.optimized_content,
-                'seo_score': result.optimization_score,
-                'keywords_used': result.keywords_used,
-                'hashtags_suggested': result.hashtags_suggested,
-                'suggestions': result.suggestions,
-                'metrics': result.metrics
+                'recommended_hashtags': ['innovation', 'business', 'growth'],
+                'primary_keywords': ['productivity', 'professional'],
+                'secondary_keywords': ['technology', 'digital'],
+                'semantic_keywords': [],
+                'trending_terms': ['AI', 'automation'],
+                'optimal_length': 280,
+                'call_to_action': 'What do you think?',
+                'timing_recommendation': 'Peak hours: 9-11 AM, 1-3 PM',
+                'engagement_tactics': ['Ask questions', 'Share insights'],
+                'llm_enhanced': False,
+                'content_type': content_type,
+                'error': str(e)
             }
-            
-        except Exception as e:
-            logger.error(f"Content optimization failed for founder {founder_id}: {e}")
-            return {
-                'original_content': content,
-                'optimized_content': content,
-                'seo_score': 0.0,
-                'keywords_used': [],
-                'hashtags_suggested': [],
-                'suggestions': [f"Optimization failed: {str(e)}"],
-                'metrics': {}
-            }
+
+
+# Factory function for easy integration
+def create_enhanced_seo_service(twitter_client: TwitterAPIClient,
+                              user_service: UserProfileService,
+                              data_flow_manager: DataFlowManager,
+                              llm_client=None,
+                              config: Dict[str, Any] = None) -> SEOService:
+    """Create enhanced SEO service with LLM integration"""
     
-    async def _store_optimization_result(self, founder_id: str, result: SEOOptimizationResult):
-        """Store optimization result in database"""
-        try:
-            optimization_data = {
-                'founder_id': founder_id,
-                'original_content': result.original_content,
-                'optimized_content': result.optimized_content,
-                'seo_score': result.optimization_score,
-                'keywords_used': result.keywords_used,
-                'hashtags_suggested': result.hashtags_suggested,
-                'optimization_timestamp': datetime.now(timezone.utc).isoformat(),
-                'metrics': result.metrics
-            }
-            
-            # Store using your database method
-            self.data_flow_manager.store_seo_optimization_result(optimization_data)
-            
-        except Exception as e:
-            logger.error(f"Failed to store optimization result: {e}")
+    return SEOService(
+        twitter_client=twitter_client,
+        user_service=user_service,
+        data_flow_manager=data_flow_manager,
+        llm_client=llm_client,
+        config=config
+    )

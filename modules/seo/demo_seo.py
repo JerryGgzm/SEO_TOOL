@@ -1,40 +1,706 @@
-"""Demo script for SEO Module functionality"""
+"""LLM-Enhanced SEO Demo and Integration Guide
+
+This demo shows how to integrate and use the LLM-enhanced SEO functionality
+with your existing content generation system.
+"""
+
 import asyncio
 import os
 import sys
-from datetime import datetime
-from typing import Dict, Any
 from pathlib import Path
+from typing import Dict, Any
+from datetime import datetime
+from dotenv import load_dotenv
 
 # Add project root to Python path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from modules.seo.models import (
-    SEOOptimizationRequest, SEOAnalysisContext, SEOContentType,
-    SEOOptimizationLevel, HashtagStrategy, HashtagGenerationRequest
-)
-from modules.seo.optimizer import SEOOptimizer
-from modules.seo.hashtag_generator import HashtagGenerator
-from modules.seo.keyword_analyzer import KeywordAnalyzer
-from modules.seo.content_enhancer import ContentEnhancer
+# Import the enhanced SEO modules
+from modules.seo.service_integration import SEOService, create_enhanced_seo_service
+from modules.seo.optimizer import SEOOptimizer, create_enhanced_seo_optimizer
+from modules.seo.llm_intelligence import LLMSEOOrchestrator, LLMSEOIntelligence, LLMSEOAnalyzer
+from modules.seo.models import SEOOptimizationRequest, SEOAnalysisContext, SEOContentType, SEOOptimizationLevel, HashtagStrategy
 
-async def demo_seo_optimization():
-    """Demo comprehensive SEO optimization"""
-    print("🎯 Demo: SEO Content Optimization")
+# Import content generation for integration demo
+from modules.content_generation.service import ContentGenerationService
+from modules.content_generation.models import ContentGenerationRequest, ContentType, GenerationMode
+
+# Mock services for demo
+from unittest.mock import Mock, MagicMock
+
+# Load environment variables
+load_dotenv()
+
+def get_llm_client():
+    """Get LLM client (adapt this to your LLM setup)"""
+    api_key = os.getenv('OPENAI_API_KEY')
+    if not api_key:
+        print("❌ OpenAI API key not found. Set OPENAI_API_KEY in your .env file")
+        return None
     
-    # Initialize SEO optimizer
-    optimizer = SEOOptimizer()
+    try:
+        import openai
+        client = openai.AsyncOpenAI(api_key=api_key)
+        print("✅ LLM client initialized successfully")
+        return client
+    except ImportError:
+        print("❌ OpenAI package not installed. Install with: pip install openai")
+        return None
+    except Exception as e:
+        print(f"❌ Failed to initialize LLM client: {e}")
+        return None
+
+def create_mock_services():
+    """Create mock services for demo"""
     
-    # Create test content
-    test_content = "Building a startup is challenging but rewarding. Here are some tips for entrepreneurs."
+    # Mock Twitter client
+    mock_twitter_client = Mock()
+    mock_twitter_client.get_trending_hashtags.return_value = ['AI', 'productivity', 'innovation']
     
-    # Create analysis context
+    # Mock user service with proper dictionary-like behavior
+    mock_user_service = Mock()
+    
+    # Create a real dictionary for user profile (not a Mock)
+    mock_user_profile = {
+        'target_audience': 'tech entrepreneurs',
+        'niche_keywords': ['startup', 'innovation', 'technology'],
+        'industry_category': 'technology',
+        'core_values': ['innovation', 'efficiency'],
+        'product_categories': ['technology'],
+        'brand_voice': 'professional',
+        'founder_id': 'demo_founder',
+        'company_name': 'Demo Company',
+        'product_name': 'AI Productivity Suite',
+        'business_model': 'SaaS',
+        'stage': 'growth',
+        'location': 'San Francisco',
+        'website': 'https://demo.com',
+        'description': 'AI-powered productivity tools for developers'
+    }
+    
+    # Make the mock return the real dictionary
+    mock_user_service.get_user_profile.return_value = mock_user_profile
+    
+    # Also handle get_founder_profile method if it exists
+    mock_user_service.get_founder_profile.return_value = mock_user_profile
+    
+    # Mock data flow manager with proper methods
+    mock_data_flow_manager = Mock()
+    mock_data_flow_manager.get_seo_performance_history.return_value = []
+    mock_data_flow_manager.store_seo_optimization_result = Mock()
+    
+    # Add content repository mock for content generation demo
+    mock_content_repo = Mock()
+    mock_content_repo.get_by_id.return_value = None  # Will be handled gracefully
+    mock_content_repo.save.return_value = "mock_draft_id_123"
+    mock_data_flow_manager.content_repo = mock_content_repo
+    
+    # Add user repository mock
+    mock_user_repo = Mock()
+    mock_user_repo.get_by_id.return_value = mock_user_profile
+    mock_data_flow_manager.user_repo = mock_user_repo
+    
+    return mock_twitter_client, mock_user_service, mock_data_flow_manager
+
+async def demo_llm_seo_intelligence():
+    """Demo core LLM SEO intelligence features"""
+    print("\n🎯 Demo: LLM SEO Intelligence Core Features")
+    
+    # Get LLM client
+    llm_client = get_llm_client()
+    if not llm_client:
+        print("⚠️ Skipping LLM demos - no LLM client available")
+        return
+    
+    # Create enhanced optimizer
+    optimizer = create_enhanced_seo_optimizer(
+        twitter_client=None,
+        config={'llm_optimization_mode': 'hybrid'},
+        llm_client=llm_client
+    )
+    
+    # Initialize LLM SEO Intelligence
+    llm_intelligence = LLMSEOIntelligence(llm_client)
+    llm_analyzer = LLMSEOAnalyzer(llm_client)
+    
+    # Test content
+    test_content = "Working on new AI features for our productivity app"
+    
+    # Create context
     context = SEOAnalysisContext(
         content_type=SEOContentType.TWEET,
-        target_audience="entrepreneurs and startup founders",
-        niche_keywords=["startup", "entrepreneur", "business"],
-        product_categories=["business tools"],
+        target_audience="tech entrepreneurs",
+        niche_keywords=["AI", "productivity", "startup"],
+        product_categories=["technology"],
+        industry_vertical="technology"
+    )
+    
+    # Create optimization request
+    request = SEOOptimizationRequest(
+        content=test_content,
+        content_type=SEOContentType.TWEET,
+        optimization_level=SEOOptimizationLevel.MODERATE
+    )
+    
+    print(f"📝 Original Content: {test_content}")
+    
+    try:
+        # Test different optimization modes
+        optimization_modes = ['traditional', 'hybrid', 'intelligent']
+        
+        for mode in optimization_modes:
+            print(f"\n🔧 Testing {mode.title()} Optimization Mode...")
+            
+            # Set optimization mode
+            optimizer.llm_config['llm_optimization_mode'] = mode
+            
+            # Perform optimization
+            result = await optimizer.optimize_content(request, context)
+            
+            print(f"✨ Optimized Content: {result.optimized_content}")
+            print(f"📊 Optimization Score: {result.optimization_score:.2f}")
+            print(f"🚀 Estimated Reach Improvement: {result.estimated_reach_improvement:.1f}%")
+            
+            if result.improvements_made:
+                print(f"🔧 Improvements Made:")
+                for improvement in result.improvements_made[:3]:
+                    print(f"  • {improvement}")
+            
+            # Show LLM insights if available
+            if result.optimization_metadata and 'llm_insights' in result.optimization_metadata:
+                llm_insights = result.optimization_metadata['llm_insights']
+                if llm_insights:
+                    print(f"🧠 LLM Insights: {len(llm_insights)} optimization strategies applied")
+        
+    except Exception as e:
+        print(f"❌ Enhanced SEO optimizer demo failed: {e}")
+
+async def demo_enhanced_seo_service():
+    """Demo enhanced SEO service integration"""
+    print("\n🎯 Demo: Enhanced SEO Service Integration")
+    
+    # Create mock services
+    twitter_client, user_service, data_flow_manager = create_mock_services()
+    
+    # Get LLM client
+    llm_client = get_llm_client()
+    
+    # Create enhanced SEO service
+    seo_service = create_enhanced_seo_service(
+        twitter_client=twitter_client,
+        user_service=user_service,
+        data_flow_manager=data_flow_manager,
+        llm_client=llm_client,
+        config={'default_optimization_mode': 'intelligent'}
+    )
+    
+    print(f"✅ Enhanced SEO Service initialized (LLM enabled: {seo_service.llm_enabled})")
+    
+    # Test content
+    test_content = "Just launched our new dashboard feature for better analytics"
+    founder_id = "demo_founder_123"
+    
+    try:
+        # Demo 1: Intelligent Content Optimization
+        print("\n🧠 Testing Intelligent Content Optimization...")
+        
+        optimization_result = await seo_service.optimize_content_intelligent(
+            text=test_content,
+            content_type='tweet',
+            context={'founder_id': founder_id},
+            optimization_mode='intelligent'
+        )
+        
+        print(f"📝 Original: {optimization_result.get('original_content', 'N/A')}")
+        print(f"✨ Optimized: {optimization_result.get('optimized_content', 'N/A')}")
+        print(f"📊 Score: {optimization_result.get('optimization_score', 0):.2f}")
+        print(f"🤖 LLM Enhanced: {optimization_result.get('llm_enhanced', False)}")
+        
+        # Show suggestions
+        seo_suggestions = optimization_result.get('seo_suggestions', {})
+        if seo_suggestions.get('recommended_hashtags'):
+            hashtags = seo_suggestions['recommended_hashtags'][:3]
+            print(f"🏷️ Recommended Hashtags: {', '.join(f'#{tag}' for tag in hashtags)}")
+        
+        # Demo 2: Content Variations
+        print("\n🎨 Testing Content Variations...")
+        
+        variations = await seo_service.generate_content_variations(
+            founder_id=founder_id,
+            content=test_content,
+            content_type='tweet',
+            variation_count=2
+        )
+        
+        for i, variation in enumerate(variations, 1):
+            print(f"\n  Variation {i}:")
+            print(f"    Content: {variation.get('optimized_content', 'N/A')}")
+            print(f"    Strategy: {variation.get('strategy', 'N/A')}")
+            print(f"    Score: {variation.get('optimization_score', 0):.2f}")
+        
+        # Demo 3: SEO Potential Analysis
+        if llm_client:
+            print("\n📊 Testing SEO Potential Analysis...")
+            
+            analysis = await seo_service.analyze_content_seo_potential(
+                content=test_content,
+                founder_id=founder_id,
+                content_type='tweet'
+            )
+            
+            print(f"🔍 Combined SEO Score: {analysis.get('combined_score', 0):.2f}")
+            print(f"🤖 LLM Enhanced: {analysis.get('llm_enhanced', False)}")
+            
+            if 'recommendations' in analysis:
+                recommendations = analysis['recommendations'][:2]
+                print(f"💡 Top Recommendations:")
+                for rec in recommendations:
+                    print(f"  • {rec}")
+        
+        # Demo 4: Enhanced Content Suggestions
+        print("\n💡 Testing Enhanced Content Suggestions...")
+        
+        trend_info = {
+            'topic_name': 'AI productivity tools',
+            'keywords': ['ai', 'productivity', 'automation']
+        }
+        
+        product_info = {
+            'target_audience': 'software developers',
+            'core_values': ['efficiency', 'innovation'],
+            'industry_category': 'technology'
+        }
+        
+        # Fix: Properly handle async get_content_suggestions method
+        try:
+            suggestions = await seo_service.get_content_suggestions(
+                trend_info=trend_info,
+                product_info=product_info,
+                content_type=SEOContentType.TWEET
+            )
+            
+            print(f"🏷️ Hashtag Suggestions: {', '.join(suggestions.recommended_hashtags[:5])}")
+            print(f"🔑 Primary Keywords: {', '.join(suggestions.primary_keywords[:3])}")
+            print(f"💬 Engagement Tactics: {', '.join(suggestions.engagement_tactics[:2])}")
+        except Exception as e:
+            print(f"⚠️ Content suggestions failed: {e}")
+            print("Skipping content suggestions demo...")
+        
+    except Exception as e:
+        print(f"❌ Enhanced SEO service demo failed: {e}")
+
+async def demo_content_generation_with_seo():
+    """Demo content generation with LLM-enhanced SEO"""
+    print("\n📝 Testing Content Generation with LLM-Enhanced SEO...")
+    
+    try:
+        # Create content generation service
+        from modules.content_generation.service import ContentGenerationService
+        
+        # Mock services with better structure
+        twitter_client, user_service, data_flow_manager = create_mock_services()
+        llm_client = get_llm_client()
+        
+        # Create SEO service
+        seo_service = create_enhanced_seo_service(
+            twitter_client=twitter_client,
+            user_service=user_service,
+            data_flow_manager=data_flow_manager,
+            llm_client=llm_client
+        )
+        
+        # Create content generation service with better error handling
+        try:
+            content_service = ContentGenerationService(
+                seo_service=seo_service,
+                data_flow_manager=data_flow_manager,
+                llm_config={
+                    'default_content_type': 'tweet',
+                    'max_content_length': 280,
+                    'enable_seo_optimization': True,
+                    'optimization_mode': 'intelligent'
+                }
+            )
+        except Exception as e:
+            print(f"⚠️ Failed to create ContentGenerationService: {e}")
+            print("This might be due to missing dependencies or configuration issues")
+            
+            # Fallback to direct SEO optimization demo
+            print("\n🔄 Demonstrating SEO optimization directly...")
+            
+            test_content = "Boost your development workflow with AI-powered tools"
+            try:
+                optimization_result = await seo_service.optimize_content_intelligent(
+                    text=test_content,
+                    content_type='tweet',
+                    context={'founder_id': 'demo_founder'},
+                    optimization_mode='intelligent'
+                )
+                
+                print(f"📝 Original: {test_content}")
+                print(f"✨ Optimized: {optimization_result.get('optimized_content', 'N/A')}")
+                print(f"📊 Score: {optimization_result.get('optimization_score', 0):.2f}")
+                print(f"🤖 LLM Enhanced: {optimization_result.get('llm_enhanced', False)}")
+            except Exception as opt_e:
+                print(f"⚠️ SEO optimization also failed: {opt_e}")
+            return
+        
+        # Test content generation request
+        from modules.content_generation.models import ContentGenerationRequest
+        
+        request = ContentGenerationRequest(
+            founder_id="demo_founder",
+            product_name="AI Productivity Suite",
+            content_type="tweet",
+            target_audience="software developers",
+            key_message="Boost your development workflow with AI-powered tools",
+            tone="professional",
+            include_hashtags=True,
+            max_length=280
+        )
+        
+        print("🔧 Generating content with LLM-enhanced SEO optimization...")
+        
+        # Generate content with comprehensive error handling
+        try:
+            draft_ids = await content_service.generate_content_for_founder(
+                founder_id=request.founder_id, 
+                request=request
+            )
+            
+            if not draft_ids:
+                print("❌ No content generated")
+                # Fallback to direct optimization
+                print("\n🔄 Demonstrating SEO optimization directly...")
+                
+                test_content = "Boost your development workflow with AI-powered tools"
+                optimization_result = await seo_service.optimize_content_intelligent(
+                    text=test_content,
+                    content_type='tweet',
+                    context={'founder_id': request.founder_id},
+                    optimization_mode='intelligent'
+                )
+                
+                print(f"📝 Original: {test_content}")
+                print(f"✨ Optimized: {optimization_result.get('optimized_content', 'N/A')}")
+                print(f"📊 Score: {optimization_result.get('optimization_score', 0):.2f}")
+                print(f"🤖 LLM Enhanced: {optimization_result.get('llm_enhanced', False)}")
+                return
+            
+            print(f"✅ Generated {len(draft_ids)} content drafts")
+            
+            # Get the first draft for demonstration
+            first_draft_id = draft_ids[0]
+            
+            # Retrieve the draft data from database
+            try:
+                draft_data = content_service.data_flow_manager.content_repo.get_by_id(first_draft_id)
+                
+                if draft_data:
+                    # Convert database model to service model for easier access
+                    draft = content_service.db_adapter.from_database_format(draft_data)
+                    
+                    print(f"📄 Generated Content: {draft.generated_text}")
+                    print(f"📊 Quality Score: {draft.quality_score.overall_score if draft.quality_score else 'N/A'}")
+                    
+                    # Check for SEO suggestions in metadata
+                    seo_metadata = draft.generation_metadata.get('seo_suggestions', {})
+                    if seo_metadata:
+                        hashtags = seo_metadata.get('recommended_hashtags', [])
+                        keywords = seo_metadata.get('primary_keywords', [])
+                        print(f"🏷️ Recommended Hashtags: {', '.join(hashtags[:5])}")
+                        print(f"🔑 Primary Keywords: {', '.join(keywords[:3])}")
+                    
+                    # Check trend alignment
+                    trend_alignment = draft.generation_metadata.get('trend_alignment', [])
+                    if trend_alignment:
+                        print(f"📈 Trend Alignment: {', '.join(trend_alignment[:3])}")
+                    
+                    # Check if SEO optimized
+                    if draft.generation_metadata.get('seo_optimized'):
+                        print("✅ Content successfully optimized with SEO")
+                    else:
+                        print("⚠️ Basic content generated (SEO optimization limited)")
+                else:
+                    print("❌ Could not retrieve generated draft")
+            except Exception as e:
+                print(f"⚠️ Could not retrieve draft data: {e}")
+            
+        except Exception as e:
+            print(f"⚠️ Content generation failed: {e}")
+            print("This might be due to missing user profile or configuration issues")
+            
+            # Try to demonstrate SEO optimization directly instead
+            print("\n🔄 Demonstrating SEO optimization directly...")
+            
+            test_content = "Boost your development workflow with AI-powered tools"
+            try:
+                optimization_result = await seo_service.optimize_content_intelligent(
+                    text=test_content,
+                    content_type='tweet',
+                    context={'founder_id': request.founder_id},
+                    optimization_mode='intelligent'
+                )
+                
+                print(f"📝 Original: {test_content}")
+                print(f"✨ Optimized: {optimization_result.get('optimized_content', 'N/A')}")
+                print(f"📊 Score: {optimization_result.get('optimization_score', 0):.2f}")
+                print(f"🤖 LLM Enhanced: {optimization_result.get('llm_enhanced', False)}")
+            except Exception as opt_e:
+                print(f"⚠️ SEO optimization also failed: {opt_e}")
+        
+        print("\n✅ Content generation with SEO demo completed!")
+        
+    except Exception as e:
+        print(f"❌ Content generation demo failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+async def demo_trending_topics_optimization():
+    """Demo trending topics optimization with LLM"""
+    print("\n🎯 Demo: Trending Topics Optimization with LLM")
+    
+    try:
+        # Create enhanced SEO service
+        twitter_client, user_service, data_flow_manager = create_mock_services()
+        llm_client = get_llm_client()
+        
+        seo_service = create_enhanced_seo_service(
+            twitter_client=twitter_client,
+            user_service=user_service,
+            data_flow_manager=data_flow_manager,
+            llm_client=llm_client
+        )
+        
+        # Test content and trending topics
+        base_content = "Our platform helps businesses improve their operations"
+        trending_topics = ['AI automation', 'digital transformation', 'productivity hacks']
+        founder_id = "demo_founder_123"
+        
+        print(f"📝 Base Content: {base_content}")
+        print(f"🔥 Trending Topics: {', '.join(trending_topics)}")
+        
+        # Optimize for trending topics
+        result = await seo_service.optimize_for_trending_topics(
+            founder_id=founder_id,
+            content=base_content,
+            trending_topics=trending_topics,
+            content_type='tweet'
+        )
+        
+        print(f"\n✨ Trend-Optimized Content: {result.get('optimized_content', 'N/A')}")
+        print(f"📊 Optimization Score: {result.get('optimization_score', 0):.2f}")
+        print(f"🔥 Trends Integrated: {', '.join(result.get('trend_integration', []))}")
+        
+        # Show LLM insights if available
+        llm_insights = result.get('llm_insights', {})
+        if llm_insights:
+            print(f"🧠 LLM Insights Available: {len(llm_insights)} optimization aspects")
+        
+    except Exception as e:
+        print(f"❌ Trending topics optimization demo failed: {e}")
+
+def demo_configuration_and_setup():
+    """Demo configuration and setup for LLM-enhanced SEO"""
+    print("\n⚙️ Demo: Configuration and Setup")
+    
+    print("🔧 LLM-Enhanced SEO Configuration Options:")
+    
+    # Configuration examples
+    configurations = {
+        'basic_llm_config': {
+            'use_llm_for_keywords': True,
+            'use_llm_for_hashtags': True,
+            'use_llm_for_engagement': True,
+            'llm_optimization_mode': 'hybrid',
+            'fallback_to_traditional': True
+        },
+        'aggressive_llm_config': {
+            'use_llm_for_keywords': True,
+            'use_llm_for_hashtags': True,
+            'use_llm_for_engagement': True,
+            'llm_optimization_mode': 'llm_enhanced',
+            'fallback_to_traditional': False
+        },
+        'intelligent_config': {
+            'use_llm_for_keywords': True,
+            'use_llm_for_hashtags': True,
+            'use_llm_for_engagement': True,
+            'llm_optimization_mode': 'intelligent',
+            'fallback_to_traditional': True,
+            'default_optimization_mode': 'intelligent'
+        }
+    }
+    
+    for config_name, config in configurations.items():
+        print(f"\n📋 {config_name.replace('_', ' ').title()}:")
+        for key, value in config.items():
+            print(f"  • {key}: {value}")
+    
+    print("\n🔌 Integration Steps:")
+    integration_steps = [
+        "1. Install required packages: pip install openai anthropic",
+        "2. Set up LLM API keys in environment variables",
+        "3. Replace SEOOptimizer with EnhancedSEOOptimizer in your services",
+        "4. Replace SEOService with EnhancedSEOService",
+        "5. Configure LLM optimization modes in your config",
+        "6. Test the integration with sample content",
+        "7. Monitor optimization results and adjust settings"
+    ]
+    
+    for step in integration_steps:
+        print(f"  {step}")
+    
+    print("\n📋 Environment Variables Required:")
+    env_vars = [
+        "OPENAI_API_KEY=your_openai_api_key_here",
+        "# Optional: For Claude integration",
+        "ANTHROPIC_API_KEY=your_anthropic_api_key_here"
+    ]
+    
+    for var in env_vars:
+        print(f"  {var}")
+
+async def demo_performance_comparison():
+    """Demo performance comparison between traditional and LLM-enhanced SEO"""
+    print("\n📊 Demo: Performance Comparison")
+    
+    try:
+        # Create both traditional and enhanced optimizers
+        twitter_client, user_service, data_flow_manager = create_mock_services()
+        llm_client = get_llm_client()
+        
+        # Traditional optimizer
+        from modules.seo.optimizer import SEOOptimizer
+        traditional_optimizer = SEOOptimizer(twitter_client)
+        
+        # Enhanced optimizer
+        enhanced_optimizer = create_enhanced_seo_optimizer(
+            twitter_client=twitter_client,
+            llm_client=llm_client
+        )
+        
+        # Test content
+        test_contents = [
+            "Working on new features for our app",
+            "Just shipped a major update to our platform",
+            "Helping businesses automate their workflows"
+        ]
+        
+        print("🔍 Comparing Traditional vs LLM-Enhanced SEO Optimization:")
+        
+        for i, content in enumerate(test_contents, 1):
+            print(f"\n--- Test {i}: {content} ---")
+            
+            # Create context
+            context = SEOAnalysisContext(
+                content_type=SEOContentType.TWEET,
+                target_audience="business professionals",
+                niche_keywords=["business", "automation", "productivity"],
+                industry_vertical="technology"
+            )
+            
+            request = SEOOptimizationRequest(
+                content=content,
+                content_type=SEOContentType.TWEET,
+                optimization_level=SEOOptimizationLevel.MODERATE
+            )
+            
+            # Traditional optimization (synchronous)
+            try:
+                traditional_result = traditional_optimizer.optimize_content(request, context)
+                traditional_score = traditional_result.optimization_score
+                traditional_content = traditional_result.optimized_content
+            except Exception as e:
+                print(f"⚠️ Traditional optimization failed: {e}")
+                traditional_score = 0.5
+                traditional_content = content
+            
+            # Enhanced optimization (synchronous for base method, async for intelligent)
+            if llm_client:
+                try:
+                    # Use the async intelligent optimization method
+                    enhanced_result_dict = await enhanced_optimizer.optimize_content_intelligent(
+                        text=content,
+                        content_type='tweet',
+                        context={'founder_id': 'demo_founder'},
+                        optimization_mode='intelligent'
+                    )
+                    enhanced_score = enhanced_result_dict.get('optimization_score', 0.5)
+                    enhanced_content = enhanced_result_dict.get('optimized_content', content)
+                    llm_enhanced = enhanced_result_dict.get('llm_enhanced', False)
+                except Exception as e:
+                    print(f"⚠️ Enhanced optimization failed: {e}")
+                    # Fallback to synchronous method
+                    try:
+                        enhanced_result = enhanced_optimizer.optimize_content(request, context)
+                        enhanced_score = enhanced_result.optimization_score
+                        enhanced_content = enhanced_result.optimized_content
+                        llm_enhanced = enhanced_result.optimization_metadata.get('llm_enhanced', False) if hasattr(enhanced_result, 'optimization_metadata') and enhanced_result.optimization_metadata else False
+                    except Exception as e2:
+                        print(f"⚠️ Fallback optimization also failed: {e2}")
+                        enhanced_score = traditional_score
+                        enhanced_content = traditional_content
+                        llm_enhanced = False
+            else:
+                # No LLM client, use traditional method
+                try:
+                    enhanced_result = enhanced_optimizer.optimize_content(request, context)
+                    enhanced_score = enhanced_result.optimization_score
+                    enhanced_content = enhanced_result.optimized_content
+                    llm_enhanced = False
+                except Exception as e:
+                    print("Got an exception", e)
+                    enhanced_score = traditional_score
+                    enhanced_content = traditional_content
+                    llm_enhanced = False
+            
+            # Display comparison
+            print(f"📊 Traditional SEO:")
+            print(f"  Content: {traditional_content}")
+            print(f"  Score: {traditional_score:.2f}")
+            
+            print(f"🤖 LLM-Enhanced SEO:")
+            print(f"  Content: {enhanced_content}")
+            print(f"  Score: {enhanced_score:.2f}")
+            print(f"  LLM Enhanced: {llm_enhanced}")
+            
+            if enhanced_score > traditional_score:
+                improvement = ((enhanced_score - traditional_score) / traditional_score) * 100
+                print(f"📈 Improvement: +{improvement:.1f}%")
+            elif enhanced_score < traditional_score:
+                decline = ((traditional_score - enhanced_score) / traditional_score) * 100
+                print(f"📉 Decline: -{decline:.1f}%")
+            else:
+                print("➡️ Similar performance")
+        
+    except Exception as e:
+        print(f"❌ Performance comparison demo failed: {e}")
+
+async def demo_enhanced_seo_optimizer():
+    """Demo enhanced SEO optimizer with LLM integration"""
+    print("\n🎯 Demo: Enhanced SEO Optimizer")
+    
+    # Get LLM client
+    llm_client = get_llm_client()
+    
+    # Create enhanced optimizer
+    optimizer = create_enhanced_seo_optimizer(
+        twitter_client=None,
+        config={'llm_optimization_mode': 'hybrid'},
+        llm_client=llm_client
+    )
+    
+    # Test content
+    test_content = "Our new feature helps developers save time and boost productivity"
+    
+    # Create context
+    context = SEOAnalysisContext(
+        content_type=SEOContentType.TWEET,
+        target_audience="software developers",
+        niche_keywords=["development", "productivity", "tools"],
+        product_categories=["technology"],
         industry_vertical="technology"
     )
     
@@ -43,639 +709,119 @@ async def demo_seo_optimization():
         content=test_content,
         content_type=SEOContentType.TWEET,
         optimization_level=SEOOptimizationLevel.MODERATE,
-        hashtag_strategy=HashtagStrategy.ENGAGEMENT_OPTIMIZED,
-        context=context
+        target_keywords=["development", "productivity"],
+        include_hashtags=True,
+        include_trending_tags=True,
+        hashtag_strategy=HashtagStrategy.ENGAGEMENT_OPTIMIZED
     )
     
     print(f"📝 Original Content: {test_content}")
     print(f"🎯 Target Audience: {context.target_audience}")
+    print(f"🔑 Target Keywords: {', '.join(request.target_keywords)}")
     print(f"🏷️ Niche Keywords: {', '.join(context.niche_keywords)}")
     
     try:
-        # Perform optimization
-        result = await optimizer.optimize_content(request)
-        
-        print("\n✅ Optimization Results:")
-        print(f"📈 Optimization Score: {result.optimization_score:.2f}")
-        print(f"🔄 Optimized Content: {result.optimized_content}")
-        print(f"📊 Estimated Reach Improvement: {result.estimated_reach_improvement:.1f}%")
-        
-        if result.improvements_made:
-            print(f"\n🔧 Improvements Made:")
-            for improvement in result.improvements_made:
-                print(f"  • {improvement}")
-        
-        # Show hashtag suggestions
-        if result.hashtag_analysis:
-            print(f"\n🏷️ Hashtag Suggestions:")
-            for hashtag in result.hashtag_analysis[:5]:
-                print(f"  • #{hashtag.hashtag} (relevance: {hashtag.relevance_score:.2f}, engagement: {hashtag.engagement_rate:.1%})")
-        
-        # Show keyword insights
-        if result.keyword_analysis:
-            print(f"\n🔍 Keyword Analysis:")
-            for keyword in result.keyword_analysis[:3]:
-                print(f"  • '{keyword.keyword}' - Volume: {keyword.search_volume}, Difficulty: {keyword.difficulty.value}")
-        
-    except Exception as e:
-        print(f"❌ Optimization failed: {e}")
-
-def demo_hashtag_generation():
-    """Demo hashtag generation"""
-    print("\n🎯 Demo: Hashtag Generation")
-    
-    generator = HashtagGenerator()
-    
-    # Create hashtag request
-    request = HashtagGenerationRequest(
-        content="AI is transforming the future of work and productivity",
-        content_type=SEOContentType.TWEET,
-        niche_keywords=["AI", "productivity", "automation"],
-        max_hashtags=8,
-        strategy=HashtagStrategy.ENGAGEMENT_OPTIMIZED,
-        target_audience="tech professionals"
-    )
-    
-    print(f"📝 Content: {request.content}")
-    print(f"🎯 Strategy: {request.strategy.value}")
-    print(f"🏷️ Niche Keywords: {', '.join(request.niche_keywords)}")
-    
-    try:
-        hashtags = generator.generate_hashtags(request)
-        
-        print(f"\n✅ Generated {len(hashtags)} hashtags:")
-        for i, hashtag in enumerate(hashtags, 1):
-            print(f"  {i}. #{hashtag.hashtag}")
-            print(f"     • Relevance: {hashtag.relevance_score:.2f}")
-            print(f"     • Engagement Rate: {hashtag.engagement_rate:.1%}")
-            print(f"     • Competition: {hashtag.competition_level.value}")
-            print(f"     • Growth Rate: {hashtag.growth_rate:.1f}%")
-        
-    except Exception as e:
-        print(f"❌ Hashtag generation failed: {e}")
-
-def demo_keyword_analysis():
-    """Demo keyword analysis"""
-    print("\n🎯 Demo: Keyword Analysis")
-    
-    analyzer = KeywordAnalyzer()
-    
-    # Create analysis context
-    context = SEOAnalysisContext(
-        content_type=SEOContentType.TWEET,
-        niche_keywords=["productivity", "automation", "efficiency"],
-        target_audience="business professionals",
-        industry_vertical="technology"
-    )
-    
-    test_content = "Boost your productivity with automation tools that save time and increase efficiency"
-    
-    print(f"📝 Content: {test_content}")
-    print(f"🎯 Niche: {', '.join(context.niche_keywords)}")
-    
-    try:
-        keywords = analyzer.analyze_keywords(test_content, context)
-        
-        print(f"\n✅ Analyzed {len(keywords)} keywords:")
-        for keyword in keywords[:5]:
-            print(f"\n  🔍 '{keyword.keyword}'")
-            print(f"     • Search Volume: {keyword.search_volume:,}")
-            print(f"     • Difficulty: {keyword.difficulty.value}")
-            print(f"     • Relevance: {keyword.relevance_score:.2f}")
-            print(f"     • Trending: {'Yes' if keyword.trending_status else 'No'}")
-            if keyword.semantic_variations:
-                print(f"     • Variations: {', '.join(keyword.semantic_variations[:3])}")
-        
-        # Generate keyword suggestions
-        suggestions = analyzer.generate_keyword_suggestions(context, 10)
-        print(f"\n💡 Keyword Suggestions:")
-        for suggestion in suggestions[:5]:
-            print(f"  • {suggestion}")
-        
-    except Exception as e:
-        print(f"❌ Keyword analysis failed: {e}")
-
-def demo_content_enhancement():
-    """Demo content enhancement"""
-    print("\n🎯 Demo: Content Enhancement")
-    
-    enhancer = ContentEnhancer()
-    
-    # Test different enhancement features
-    test_contents = [
-        {
-            'content': "This is a basic post about business growth",
-            'description': "Basic content enhancement"
-        },
-        {
-            'content': "AI and machine learning are revolutionizing business operations and customer experience",
-            'description': "Keyword integration"
-        },
-        {
-            'content': "Very long sentence that goes on and on about productivity and efficiency and automation and all the ways that technology can help businesses improve their operations and reduce costs while increasing revenue and customer satisfaction",
-            'description': "Readability improvement"
-        }
-    ]
-    
-    for test in test_contents:
-        print(f"\n--- {test['description']} ---")
-        print(f"📝 Original: {test['content']}")
-        
-        try:
-            # Test different enhancements
-            enhanced = enhancer.improve_readability(test['content'])
-            print(f"📖 Readability: {enhanced}")
+        # Test different optimization modes if LLM is available
+        if llm_client:
+            print("\n🤖 Testing LLM-Enhanced Optimization Modes...")
             
-            enhanced_engagement = enhancer.add_engagement_elements(enhanced)
-            print(f"💬 Engagement: {enhanced_engagement}")
+            modes = ['traditional', 'hybrid', 'llm_enhanced']
             
-            # Test keyword enhancement
-            if 'keyword' in test['description'].lower():
-                keywords = ['productivity', 'automation']
-                keyword_enhanced = enhancer.enhance_with_keywords(test['content'], keywords)
-                print(f"🔍 With Keywords: {keyword_enhanced}")
-            
-        except Exception as e:
-            print(f"❌ Enhancement failed: {e}")
-
-def demo_platform_optimization():
-    """Demo platform-specific optimization"""
-    print("\n🎯 Demo: Platform Optimization")
-    
-    enhancer = ContentEnhancer()
-    
-    base_content = "Sharing insights about AI and innovation in the tech industry"
-    
-    platforms = ['twitter', 'linkedin', 'facebook']
-    
-    print(f"📝 Base Content: {base_content}")
-    
-    for platform in platforms:
-        try:
-            optimized = enhancer.optimize_for_platform(base_content, platform)
-            print(f"\n📱 {platform.title()}: {optimized}")
-            
-        except Exception as e:
-            print(f"❌ {platform} optimization failed: {e}")
-
-async def demo_integration_with_content_generation():
-    """Demo integration with content generation module"""
-    print("\n🎯 Demo: Integration with Content Generation")
-    
-    optimizer = SEOOptimizer()
-    
-    # Simulate trend info and product info from other modules
-    trend_info = {
-        'topic_name': 'AI productivity tools',
-        'keywords': ['ai', 'productivity', 'automation', 'efficiency'],
-        'pain_points': ['time management', 'workflow optimization']
-    }
-    
-    product_info = {
-        'name': 'ProductivityAI',
-        'target_audience': 'busy professionals',
-        'core_values': ['efficiency', 'innovation', 'simplicity'],
-        'industry_category': 'productivity software'
-    }
-    
-    print("🔗 Simulating ContentGenerationModule integration...")
-    print(f"📈 Trend: {trend_info['topic_name']}")
-    print(f"🎯 Product: {product_info['name']}")
-    
-    try:
-        # Get SEO suggestions for content generation
-        suggestions = await optimizer.get_content_suggestions(
-            trend_info, product_info, SEOContentType.TWEET
+            for mode in modes:
+                print(f"\n--- {mode.upper()} MODE ---")
+                
+                # Update optimizer config
+                optimizer.llm_config['llm_optimization_mode'] = mode
+                
+                # Use async method for LLM-enhanced optimization
+                if mode in ['hybrid', 'llm_enhanced'] and hasattr(optimizer, 'optimize_content_async'):
+                    try:
+                        mode_result = await optimizer.optimize_content_async(request, context)
+                    except Exception as e:
+                        print(f"⚠️ Async optimization failed: {e}")
+                        # Fallback to sync method
+                        mode_result = optimizer.optimize_content(request, context)
+                else:
+                    mode_result = optimizer.optimize_content(request, context)
+                
+                print(f"Content: {mode_result.optimized_content}")
+                print(f"Score: {mode_result.optimization_score:.2f}")
+                
+                # Check if LLM was actually used
+                llm_used = mode_result.optimization_metadata.get('llm_enhanced', False) if hasattr(mode_result, 'optimization_metadata') and mode_result.optimization_metadata else False
+                print(f"LLM Enhanced: {llm_used}")
+        
+        # Test intelligent optimization (this one is async)
+        print("\n🧠 Testing Intelligent Optimization...")
+        
+        intelligent_result = await optimizer.optimize_content_intelligent(
+            text=test_content,
+            content_type='tweet',
+            context={'founder_id': 'demo_founder'},
+            optimization_mode='intelligent'
         )
         
-        print("\n✅ SEO Suggestions for Content Generation:")
-        print(f"🏷️ Recommended Hashtags: {', '.join(f'#{h}' for h in suggestions.recommended_hashtags)}")
-        print(f"🔍 Primary Keywords: {', '.join(suggestions.primary_keywords)}")
-        print(f"📏 Optimal Length: {suggestions.optimal_length} characters")
-        print(f"📢 Suggested CTA: {suggestions.call_to_action}")
+        print(f"🧠 Intelligent Result: {intelligent_result.get('optimized_content', 'N/A')}")
+        print(f"📊 Intelligence Score: {intelligent_result.get('optimization_score', 0):.2f}")
         
-        # Test simple content optimization
-        test_content = "AI tools are changing how we work and boosting productivity for teams everywhere"
-        context = {
-            'seo_keywords': suggestions.primary_keywords,
-            'target_audience': product_info['target_audience']
-        }
+        if 'llm_insights' in intelligent_result:
+            insights = intelligent_result['llm_insights']
+            print(f"💡 LLM Insights: {len(insights)} optimization aspects analyzed")
         
-        optimized = optimizer.optimize_content_simple(test_content, SEOContentType.TWEET, context)
-        print(f"\n🔄 Quick Optimization:")
-        print(f"   Original: {test_content}")
-        print(f"   Optimized: {optimized}")
+        print("\n✅ Enhanced SEO Optimizer demo completed!")
         
     except Exception as e:
-        print(f"❌ Integration demo failed: {e}")
-
-def demo_competitor_analysis():
-    """Demo competitor hashtag analysis"""
-    print("\n🎯 Demo: Competitor Analysis")
-    
-    generator = HashtagGenerator()
-    
-    competitor_handles = ['@competitor1', '@competitor2', '@competitor3']
-    
-    print(f"🔍 Analyzing competitors: {', '.join(competitor_handles)}")
-    
-    try:
-        analysis = generator.analyze_competitor_hashtags(competitor_handles)
-        
-        print(f"\n✅ Competitor Analysis Results:")
-        print(f"🔝 Top Hashtags: {', '.join(f'#{h}' for h in analysis.top_hashtags)}")
-        print(f"📊 Most Frequent:")
-        for hashtag, count in list(analysis.hashtag_frequency.items())[:3]:
-            print(f"   • #{hashtag}: {count} uses")
-        
-        print(f"📈 Best Engagement:")
-        for hashtag, score in list(analysis.engagement_correlation.items())[:3]:
-            print(f"   • #{hashtag}: {score:.1%} correlation")
-        
-        if analysis.gap_opportunities:
-            print(f"💡 Gap Opportunities: {', '.join(f'#{h}' for h in analysis.gap_opportunities)}")
-        
-    except Exception as e:
-        print(f"❌ Competitor analysis failed: {e}")
-
-async def demo_system_integration():
-    """Demo real system integration"""
-    print("\n🔗 Demo: Real System Integration")
-    
-    try:
-        # Use absolute imports
-        from database import DataFlowManager
-        from modules.user_profile import UserProfileService
-        from modules.twitter_api.client import TwitterAPIClient
-        from modules.content_generation.service import ContentGenerationService
-        from modules.analytics.collector import AnalyticsCollector
-        from modules.seo.service_integration import SEOService
-        from modules.seo.models import SEOContentType, SEOOptimizationLevel
-        
-        print("🚀 Initializing system components...")
-        
-        # Check if configuration is available
-        try:
-            from config.settings import settings
-            settings.TWITTER.validate()
-            print("✅ Twitter API credentials found")
-            
-            # Initialize Twitter client with real credentials
-            twitter_client = TwitterAPIClient(
-                client_id=settings.TWITTER.CLIENT_ID,
-                client_secret=settings.TWITTER.CLIENT_SECRET
-            )
-        except (ImportError, ValueError) as e:
-            print(f"⚠️ Configuration issue: {e}")
-            print("💡 Using mock Twitter client for demo")
-            
-            # Create mock Twitter client for demo
-            class MockTwitterClient:
-                def __init__(self, client_id, client_secret):
-                    self.client_id = client_id
-                    self.client_secret = client_secret
-                
-                def get_tweet_by_id(self, *args, **kwargs):
-                    return {
-                        'data': {
-                            'public_metrics': {
-                                'like_count': 10,
-                                'retweet_count': 2,
-                                'reply_count': 1,
-                                'quote_count': 0
-                            },
-                            'created_at': '2024-01-01T12:00:00Z'
-                        }
-                    }
-            
-            twitter_client = MockTwitterClient("demo_client_id", "demo_client_secret")
-        
-        # Initialize database and services
-        try:
-            data_flow_manager = DataFlowManager()
-            print("✅ Database manager initialized")
-        except Exception as e:
-            print(f"⚠️ Database initialization issue: {e}")
-            print("💡 Using mock data flow manager for demo")
-            
-            # Create mock data flow manager
-            class MockDataFlowManager:
-                def store_seo_optimization_result(self, data):
-                    print(f"📝 Mock: Stored SEO result for {data.get('founder_id')}")
-                
-                def get_seo_performance_history(self, founder_id, days):
-                    return []
-            
-            data_flow_manager = MockDataFlowManager()
-        
-        # Initialize services with error handling
-        try:
-            user_profile_service = UserProfileService(data_flow_manager)
-            print("✅ User profile service initialized")
-        except Exception as e:
-            print(f"⚠️ User service issue: {e}")
-            user_profile_service = None
-        
-        try:
-            analytics_collector = AnalyticsCollector(data_flow_manager, twitter_client)
-            print("✅ Analytics collector initialized")
-        except Exception as e:
-            print(f"⚠️ Analytics collector issue: {e}")
-            analytics_collector = None
-        
-        try:
-            seo_service = SEOService(data_flow_manager, user_profile_service, twitter_client)
-            print("✅ SEO service initialized")
-        except Exception as e:
-            print(f"⚠️ SEO service issue: {e}")
-            # Create minimal SEO service for demo
-            from modules.seo.optimizer import SEOOptimizer
-            
-            class MockSEOService:
-                def __init__(self):
-                    self.optimizer = SEOOptimizer()
-                
-                async def optimize_content_for_founder(self, founder_id, content, content_type='tweet'):
-                    result = self.optimizer.optimize_content(content)
-                    return {
-                        'original_content': result.original_content,
-                        'optimized_content': result.optimized_content,
-                        'seo_score': result.optimization_score,
-                        'keywords_used': result.keywords_used,
-                        'hashtags_suggested': result.hashtags_suggested
-                    }
-                
-                async def get_optimization_recommendations(self, founder_id, days=30):
-                    return {
-                        'recommendations': [
-                            'Add more relevant hashtags',
-                            'Include trending keywords',
-                            'Optimize content length'
-                        ]
-                    }
-                
-                async def get_seo_analytics(self, founder_id, days=30):
-                    return {
-                        'avg_seo_score': 0.75,
-                        'total_optimizations': 15,
-                        'top_keywords': ['productivity', 'ai', 'automation']
-                    }
-            
-            seo_service = MockSEOService()
-        
-        try:
-            content_service = ContentGenerationService(data_flow_manager, seo_service)
-            print("✅ Content generation service initialized")
-        except Exception as e:
-            print(f"⚠️ Content service issue: {e}")
-            content_service = None
-        
-        print("✅ System components initialized (with fallbacks where needed)")
-        
-        # Demo with a test founder
-        founder_id = "demo_founder_123"
-        print(f"\n👤 Working with founder: {founder_id}")
-        
-        # 1. Generate content with SEO optimization
-        print("\n📝 Step 1: Generate SEO-optimized content")
-        
-        sample_content = "Working on new features for our productivity app"
-        
-        if seo_service:
-            optimized_result = await seo_service.optimize_content_for_founder(
-                founder_id=founder_id,
-                content=sample_content,
-                content_type='tweet'
-            )
-            
-            print(f"✅ Original: {optimized_result.get('original_content', 'N/A')}")
-            print(f"✨ Optimized: {optimized_result.get('optimized_content', 'N/A')}")
-            print(f"🏷️ Hashtags: {', '.join(optimized_result.get('hashtags_suggested', []))}")
-            print(f"📊 SEO score: {optimized_result.get('seo_score', 0):.2f}")
-        
-        # 2. Analyze existing content performance
-        print("\n📈 Step 2: Analyze content performance")
-        
-        if analytics_collector:
-            try:
-                performance_data = await analytics_collector.collect_real_time_metrics(founder_id)
-                print(f"📊 Real-time metrics: {performance_data}")
-            except Exception as e:
-                print(f"⚠️ Analytics collection failed: {e}")
-                print("📊 Mock metrics: {'today_posts': 2, 'week_posts': 8, 'engagement_trend': 'improving'}")
-        
-        # 3. Get SEO recommendations
-        print("\n💡 Step 3: Get SEO recommendations")
-        
-        if seo_service:
-            seo_recommendations = await seo_service.get_optimization_recommendations(
-                founder_id=founder_id,
-                days=30
-            )
-            
-            print("🎯 SEO Recommendations:")
-            for rec in seo_recommendations.get('recommendations', [])[:3]:
-                print(f"  • {rec}")
-        
-        # 4. Track SEO performance over time
-        print("\n📈 Step 4: Track SEO performance")
-        
-        if seo_service:
-            seo_analytics = await seo_service.get_seo_analytics(founder_id, days=30)
-            
-            print(f"📊 SEO Analytics Summary:")
-            print(f"  • Average SEO Score: {seo_analytics.get('avg_seo_score', 0):.2f}")
-            print(f"  • Total Optimizations: {seo_analytics.get('total_optimizations', 0)}")
-            print(f"  • Top Keywords: {', '.join(seo_analytics.get('top_keywords', [])[:3])}")
-        
-        print("\n✅ System integration demo completed successfully!")
-        
-    except ImportError as e:
-        print(f"❌ Missing dependency: {e}")
-        print("💡 Make sure all modules are properly installed and configured")
-        print("💡 Try running from project root: python -m modules.seo.demo_seo")
-    except Exception as e:
-        print(f"❌ Integration demo failed: {e}")
-        print("💡 Check your configuration and database setup")
-
-async def demo_content_generation_integration():
-    """Demo integration with content generation module"""
-    print("\n🎯 Demo: Content Generation Integration")
-    
-    try:
-        from modules.seo.optimizer import SEOOptimizer
-        from modules.seo.models import SEOContentType, SEOOptimizationLevel
-        
-        print("📝 Content Generation Integration Features:")
-        print("1. Automatic SEO optimization during content creation")
-        print("2. Keyword integration based on trends and niche")
-        print("3. Hashtag suggestions for maximum reach")
-        print("4. Content length optimization for platform")
-        
-        # Demo SEO optimization
-        optimizer = SEOOptimizer()
-        
-        sample_contents = [
-            "Excited to share our new AI tool",
-            "Building the future of productivity software",
-            "Just launched our latest feature update"
-        ]
-        
-        print("\n📊 SEO Optimization Examples:")
-        
-        for i, content in enumerate(sample_contents, 1):
-            result = optimizer.optimize_content(
-                content=content,
-                content_type=SEOContentType.TWEET,
-                target_keywords=['ai', 'productivity', 'software']
-            )
-            
-            print(f"\n{i}. Original: {result.original_content}")
-            print(f"   Optimized: {result.optimized_content}")
-            print(f"   SEO Score: {result.optimization_score:.2f}")
-            print(f"   Keywords: {', '.join(result.keywords_used[:3])}")
-            print(f"   Hashtags: {', '.join(result.hashtags_suggested[:3])}")
-        
-        print("\n✅ Content generation integration demo completed!")
-        
-    except Exception as e:
-        print(f"❌ Content generation integration demo failed: {e}")
-
-async def demo_analytics_integration():
-    """Demo integration with analytics module"""
-    print("\n🎯 Demo: Analytics Integration")
-    
-    try:
-        print("📊 Analytics Integration Features:")
-        print("1. Real-time SEO performance monitoring")
-        print("2. Keyword and hashtag effectiveness tracking")
-        print("3. Content optimization ROI analysis")
-        print("4. Trend correlation with SEO performance")
-        
-        analytics_features = [
-            "📈 Track SEO score improvements over time",
-            "🏷️ Monitor hashtag performance and reach",
-            "🔍 Analyze keyword effectiveness and ranking",
-            "💰 Calculate ROI of SEO optimization efforts",
-            "🎯 Identify high-performing content patterns"
-        ]
-        
-        for feature in analytics_features:
-            print(f"   • {feature}")
-        
-        print("\n📋 Analytics Workflow:")
-        print("1. AnalyticsCollector gathers real-time engagement data")
-        print("2. SEOPerformanceAnalyzer processes SEO-specific metrics")
-        print("3. System generates actionable insights and recommendations")
-        print("4. Feedback loop improves future content optimization")
-        
-        print("\n✅ Analytics integration demo completed!")
-        
-    except Exception as e:
-        print(f"❌ Analytics integration demo failed: {e}")
-
-async def demo_twitter_api_integration():
-    """Demo integration with Twitter API"""
-    print("\n🎯 Demo: Twitter API Integration")
-    
-    try:
-        print("🐦 Twitter API Integration Features:")
-        print("1. Real-time engagement metrics collection")
-        print("2. Hashtag performance tracking")
-        print("3. Trend analysis and keyword research")
-        print("4. Content reach and impression analytics")
-        
-        api_features = [
-            "📊 Fetch real tweet engagement metrics",
-            "🔥 Monitor trending hashtags and topics",
-            "👥 Analyze audience engagement patterns",
-            "📈 Track content performance over time",
-            "🎯 Optimize posting times based on engagement data"
-        ]
-        
-        for feature in api_features:
-            print(f"   • {feature}")
-        
-        print("\n⚙️ Configuration Required:")
-        print("1. Set up Twitter Developer Account")
-        print("2. Create Twitter App and get API credentials")
-        print("3. Configure OAuth 2.0 for user authentication")
-        print("4. Store user access tokens securely")
-        
-        print("\n💡 Usage in SEO Module:")
-        print("  • Real engagement data improves SEO score accuracy")
-        print("  • Trending topics inform keyword strategy")
-        print("  • Performance metrics guide optimization decisions")
-        
-        print("\n✅ Twitter API integration demo completed!")
-        
-    except Exception as e:
-        print(f"❌ Twitter API integration demo failed: {e}")
-
-# Import existing demo functions
-from modules.seo.demo_seo_basic import (
-    demo_seo_optimization,
-    demo_hashtag_generation,
-    demo_keyword_analysis,
-    demo_content_enhancement,
-    demo_platform_optimization,
-    demo_integration_with_content_generation,
-    demo_competitor_analysis
-)
+        print(f"❌ Enhanced SEO optimizer demo failed: {e}")
+        import traceback
+        traceback.print_exc()
 
 async def main():
-    """Run all SEO module demos including system integration"""
-    print("🚀 SEO Module Comprehensive Demo with System Integration")
+    """Run all LLM-enhanced SEO demos"""
+    print("🚀 LLM-Enhanced SEO Module Demo")
     print("=" * 60)
     
-    # Run basic demos first
-    try:
-        await demo_seo_optimization()
-        demo_hashtag_generation()
-        demo_keyword_analysis()
-        demo_content_enhancement()
-        demo_platform_optimization()
-        await demo_integration_with_content_generation()
-        demo_competitor_analysis()
-    except Exception as e:
-        print(f"⚠️ Some basic demos failed: {e}")
-    
-    # Run integration demos
-    await demo_system_integration()
-    await demo_content_generation_integration()
-    await demo_analytics_integration()
-    await demo_twitter_api_integration()
+    # Check LLM availability
+    llm_client = get_llm_client()
+    if llm_client:
+        print("✅ LLM client available - running full demos")
+    else:
+        print("⚠️ LLM client not available - running limited demos")
     
     print("\n" + "=" * 60)
-    print("🎉 Complete SEO Module Demo with System Integration!")
     
-    print("\n🔧 Integration Checklist:")
-    print("✅ SEO optimization during content generation")
-    print("✅ Real-time analytics and performance tracking")
-    print("✅ Twitter API integration for live data")
-    print("✅ Automated keyword and hashtag optimization")
-    print("✅ Performance-based recommendation system")
+    # Run demos
+    try:
+        await demo_llm_seo_intelligence()
+        await demo_enhanced_seo_optimizer()
+        await demo_enhanced_seo_service()
+        await demo_content_generation_with_seo()
+        await demo_trending_topics_optimization()
+        await demo_performance_comparison()
+        
+        # Configuration demo (non-async)
+        demo_configuration_and_setup()
+        
+    except Exception as e:
+        print(f"❌ Demo execution failed: {e}")
     
-    print("\n📋 Next Steps for Production:")
-    print("1. Configure real Twitter API credentials")
-    print("2. Set up database with proper founder and content data")
-    print("3. Implement user authentication and token management")
-    print("4. Add error handling and monitoring")
-    print("5. Set up automated SEO performance reporting")
+    print("\n" + "=" * 60)
+    print("🎉 LLM-Enhanced SEO Demo Completed!")
     
-    print("\n💡 Quick Start Guide:")
-    print("```python")
-    print("# Initialize SEO service")
-    print("seo_service = SEOService(data_flow_manager, user_service, twitter_client)")
-    print("")
-    print("# Generate SEO-optimized content")
-    print("content = await seo_service.optimize_content_for_founder(")
-    print("    founder_id, content, content_type")
-    print(")")
-    print("")
-    print("# Track performance")
-    print("analytics = await seo_service.get_seo_analytics(founder_id)")
-    print("```")
+    print("\n🔧 Quick Integration Guide:")
+    print("1. Replace your existing SEOOptimizer with EnhancedSEOOptimizer")
+    print("2. Replace your SEOService with EnhancedSEOService")
+    print("3. Pass your LLM client when initializing the services")
+    print("4. Configure optimization modes in your config")
+    print("5. Your ContentGenerationModule will automatically use LLM-enhanced SEO")
+    
+    print("\n💡 Key Benefits:")
+    print("✅ Intelligent keyword integration that maintains natural flow")
+    print("✅ Context-aware hashtag optimization")
+    print("✅ Engagement-focused content enhancement")
+    print("✅ Trend-aligned content optimization")
+    print("✅ Multiple optimization strategies (traditional, hybrid, intelligent)")
+    print("✅ Backward compatibility with existing code")
+    print("✅ Comprehensive analytics and insights")
 
 if __name__ == "__main__":
     asyncio.run(main())

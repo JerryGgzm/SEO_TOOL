@@ -41,6 +41,9 @@ class ContentGenerator:
         self.quality_checker = quality_checker or ContentQualityChecker()
         self.prompt_engine = prompt_engine or PromptEngine()
         
+        # SEO optimizer will be lazy loaded when needed
+        self._seo_optimizer = seo_optimizer
+        
         # Initialize logger
         self.logger = logging.getLogger(__name__)
         
@@ -51,6 +54,18 @@ class ContentGenerator:
             'trend_based': self._generate_trend_based_content,
             'balanced': self._generate_balanced_content
         }
+    
+    @property
+    def seo_optimizer(self):
+        """Lazy load SEO optimizer to avoid circular imports"""
+        if self._seo_optimizer is None:
+            try:
+                from modules.seo.optimizer import create_enhanced_seo_optimizer
+                self._seo_optimizer = create_enhanced_seo_optimizer()
+            except ImportError as e:
+                self.logger.warning(f"Could not load SEO optimizer: {e}")
+                self._seo_optimizer = None
+        return self._seo_optimizer
     
     async def generate_content(self, request: ContentGenerationRequest, 
                              context: ContentGenerationContext) -> List[ContentDraft]:
