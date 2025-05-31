@@ -8,7 +8,7 @@ import re
 from .models import (
     SEOOptimizationRequest, SEOOptimizationResult, ContentOptimizationSuggestions,
     SEOAnalysisContext, SEOContentType, SEOOptimizationLevel, HashtagStrategy,
-    HashtagMetrics, KeywordAnalysis, HashtagGenerationRequest
+    HashtagMetrics, KeywordAnalysis
 )
 from .hashtag_generator import HashtagGenerator
 from .keyword_analyzer import KeywordAnalyzer
@@ -180,6 +180,7 @@ class SEOOptimizer:
     
     async def _analyze_hashtags(self, request: SEOOptimizationRequest) -> List[HashtagMetrics]:
         """Analyze and generate hashtag recommendations"""
+        from .models import HashtagGenerationRequest
         
         # Create hashtag generation request
         hashtag_request = HashtagGenerationRequest(
@@ -666,43 +667,3 @@ class SEOOptimizer:
         except Exception as e:
             logger.error(f"Simple content optimization failed: {e}")
             return text
-    
-    def get_optimization_analytics(self, optimization_results: List[SEOOptimizationResult]) -> Dict[str, Any]:
-        """Analyze optimization performance across multiple results"""
-        try:
-            if not optimization_results:
-                return {'message': 'No optimization results to analyze'}
-            
-            # Calculate average metrics
-            avg_optimization_score = sum(r.optimization_score for r in optimization_results) / len(optimization_results)
-            avg_reach_improvement = sum(r.estimated_reach_improvement for r in optimization_results) / len(optimization_results)
-            
-            # Count improvement types
-            improvement_counts = {}
-            for result in optimization_results:
-                for improvement in result.improvements_made:
-                    improvement_counts[improvement] = improvement_counts.get(improvement, 0) + 1
-            
-            # Most common hashtags
-            all_hashtags = []
-            for result in optimization_results:
-                all_hashtags.extend([ht.hashtag for ht in result.hashtag_analysis])
-            
-            hashtag_counts = {}
-            for hashtag in all_hashtags:
-                hashtag_counts[hashtag] = hashtag_counts.get(hashtag, 0) + 1
-            
-            top_hashtags = sorted(hashtag_counts.items(), key=lambda x: x[1], reverse=True)[:10]
-            
-            return {
-                'total_optimizations': len(optimization_results),
-                'avg_optimization_score': round(avg_optimization_score, 3),
-                'avg_reach_improvement': round(avg_reach_improvement, 1),
-                'most_common_improvements': dict(sorted(improvement_counts.items(), key=lambda x: x[1], reverse=True)[:5]),
-                'top_recommended_hashtags': [hashtag for hashtag, count in top_hashtags],
-                'optimization_success_rate': len([r for r in optimization_results if r.optimization_score > 0.6]) / len(optimization_results)
-            }
-            
-        except Exception as e:
-            logger.error(f"Optimization analytics failed: {e}")
-            return {'error': str(e)}
