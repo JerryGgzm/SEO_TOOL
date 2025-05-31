@@ -2,15 +2,15 @@
 import asyncio
 import os
 import sys
+from pathlib import Path
+from typing import Dict, Any, List
 from datetime import datetime
 from dotenv import load_dotenv
 import json
 
 # Add project root to Python path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(os.path.dirname(current_dir))
-if project_root not in sys.path:
-    sys.path.insert(0, project_root)
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
 
 # Import content generation models and services
 from modules.content_generation.models import (
@@ -38,6 +38,38 @@ from unittest.mock import Mock, MagicMock
 
 # Load environment variables
 load_dotenv()
+
+def get_openai_api_key() -> str:
+    """Get OpenAI API key from environment variables"""
+    api_key = os.getenv('OPENAI_API_KEY')
+    if not api_key:
+        # Try alternative environment variable names
+        api_key = os.getenv('OPENAI_KEY') or os.getenv('OPENAI_SECRET_KEY')
+    
+    if not api_key:
+        print("❌ OpenAI API key not found in environment variables.")
+        print("💡 Please add OPENAI_API_KEY to your .env file:")
+        print("   OPENAI_API_KEY=your_api_key_here")
+        return None
+    
+    return api_key
+
+def get_twitter_credentials() -> Dict[str, str]:
+    """Get Twitter API credentials from environment variables"""
+    credentials = {
+        'client_id': os.getenv('TWITTER_CLIENT_ID'),
+        'client_secret': os.getenv('TWITTER_CLIENT_SECRET'),
+        'bearer_token': os.getenv('TWITTER_BEARER_TOKEN')
+    }
+    
+    missing = [key for key, value in credentials.items() if not value]
+    if missing:
+        print(f"⚠️ Missing Twitter credentials: {', '.join(missing)}")
+        print("💡 Please add to your .env file:")
+        for key in missing:
+            print(f"   {key.upper()}=your_{key}_here")
+    
+    return credentials
 
 class MockTwitterClient:
     """Mock Twitter client for demo"""
@@ -125,192 +157,108 @@ class MockDataFlowManager:
                 if record.get('founder_id') == founder_id]
 
 async def demo_basic_seo_content_generation():
-    """Demo basic content generation with SEO optimization"""
-    print("🎯 Demo: Basic Content Generation with SEO Integration")
-    
-    # Check API key
-    api_key = os.getenv('OPENAI_API_KEY')
-    if not api_key or api_key == 'your-openai-api-key-here':
-        print("⚠️ Please set OPENAI_API_KEY in .env file")
-        print("💡 Using mock LLM responses for demo")
-        api_key = "demo_key"
+    """Demo basic SEO-enhanced content generation"""
+    print("\n🎯 Demo: Basic SEO-Enhanced Content Generation")
     
     try:
-        # Initialize mock services
-        twitter_client = MockTwitterClient()
-        user_service = MockUserProfileService()
-        data_flow_manager = MockDataFlowManager()
+        # Get API key from environment
+        api_key = get_openai_api_key()
+        if not api_key:
+            return
         
-        # Initialize SEO optimizer
-        seo_optimizer = SEOOptimizer(twitter_client)
+        print("✅ OpenAI API key loaded from environment")
         
-        # Initialize SEO service
-        seo_service = SEOService(
-            twitter_client=twitter_client,
-            user_service=user_service,
-            data_flow_manager=data_flow_manager
+        # Import required modules
+        from modules.content_generation.generator import ContentGenerator, ContentGenerationFactory
+        from modules.content_generation.models import (
+            ContentGenerationRequest, ContentGenerationContext, 
+            ContentType, GenerationMode
         )
         
-        # Create enhanced content generator with SEO integration
+        # Configure LLM (remove 'provider' from config to avoid duplication)
         llm_config = {
-            'provider': 'openai',
             'api_key': api_key,
             'model_name': 'gpt-3.5-turbo'
         }
         
+        # Create enhanced generator with SEO
+        try:
+            from modules.seo.optimizer import SEOOptimizer
+            seo_optimizer = SEOOptimizer()
+            print("✅ SEO optimizer initialized")
+        except Exception as e:
+            print(f"⚠️ SEO optimizer initialization failed: {e}")
+            seo_optimizer = None
+        
         enhanced_generator = ContentGenerationFactory.create_enhanced_generator(
-            llm_provider='openai',
-            llm_config=llm_config,
+            llm_provider='openai',  # Pass provider separately
+            llm_config=llm_config,  # Config without provider
             seo_optimizer=seo_optimizer
         )
         
-        # Create test request with SEO focus
+        print("✅ Enhanced content generator created with SEO integration")
+        
+        # Create sample request with lower quality threshold for demo
         request = ContentGenerationRequest(
-            founder_id="demo-founder",
+            founder_id="demo_founder_123",
             content_type=ContentType.TWEET,
-            quantity=2,
-            quality_threshold=0.3,
-            generation_strategy="seo_optimized"  # Use SEO-focused generation
+            trend_id="trend_456",
+            generation_mode=GenerationMode.SEO_OPTIMIZED,
+            quality_threshold=0.3  # Lower threshold for demo
         )
         
-        # Create enhanced context with SEO data
+        # Create sample context
         context = ContentGenerationContext(
-            founder_id="demo-founder",
-            product_info={
-                'name': 'AI Productivity Assistant',
-                'description': 'Helps professionals manage tasks and workflows',
-                'core_values': ['efficiency', 'innovation', 'simplicity'],
-                'industry_category': 'productivity software'
-            },
-            brand_voice=BrandVoice(
-                tone="professional",
-                style="helpful",
-                personality_traits=["innovative", "reliable"]
-            ),
-            target_audience="busy professionals and entrepreneurs",
             trend_info={
-                'topic_name': 'AI productivity tools',
-                'pain_points': ['information overload', 'task management', 'workflow efficiency'],
-                'questions': ['How to be more productive?', 'Best AI tools for work?'],
-                'keywords': ['ai', 'productivity', 'automation', 'efficiency']
+                "topic_name": "AI productivity tools",
+                "keywords": ["ai", "productivity", "automation"],
+                "pain_points": ["time management", "workflow optimization"]
             },
+            product_info={
+                "name": "ProductivityAI",
+                "description": "AI-powered productivity assistant",
+                "target_audience": "busy professionals",
+                "core_values": ["efficiency", "innovation"],
+                "industry_category": "productivity software"
+            },
+            target_audience="tech-savvy professionals",
             content_preferences={
-                'seo_enhanced': True,
-                'optimization_focus': 'engagement_and_discovery'
+                "tone": "professional",
+                "include_hashtags": True,
+                "max_length": 250  # Reduced to leave room for processing
             }
         )
         
-        print("🤖 Generating SEO-optimized content...")
+        print("\n📝 Generating SEO-optimized content...")
         
-        # Generate content with SEO optimization
-        try:
-            drafts = await enhanced_generator.generate_content(request, context)
-        except Exception as llm_error:
-            print(f"⚠️ LLM generation failed: {llm_error}")
-            print("💡 Using mock content for demo")
-            # Create mock drafts for demo
-            from modules.content_generation.models import ContentDraft, ContentQualityScore
-            drafts = [
-                ContentDraft(
-                    founder_id="demo-founder",
-                    content_type=ContentType.TWEET,
-                    generated_text="🚀 Boost your productivity with AI! Our latest tools help busy professionals save 2+ hours daily through smart automation. What's your biggest workflow challenge? #AI #ProductivityHack #Innovation",
-                    seo_suggestions=SEOSuggestions(
-                        hashtags=['AI', 'ProductivityHack', 'Innovation', 'Automation'],
-                        keywords=['ai', 'productivity', 'automation', 'workflow'],
-                        trending_tags=['AI', 'Innovation'],
-                        optimal_length=250
-                    ),
-                    quality_score=ContentQualityScore(
-                        overall_score=0.82,
-                        engagement_prediction=0.85,
-                        brand_alignment=0.88,
-                        trend_relevance=0.79,
-                        seo_optimization=0.84,
-                        readability=0.81,
-                        issues=[],
-                        suggestions=["Excellent SEO integration", "Strong engagement elements"]
-                    ),
-                    generation_metadata={
-                        'seo_optimized': True,
-                        'seo_quality_score': 0.84,
-                        'keywords_used': ['ai', 'productivity', 'automation'],
-                        'hashtags_suggested': ['AI', 'ProductivityHack', 'Innovation'],
-                        'optimization_method': 'seo_optimized_generation'
-                    }
-                ),
-                ContentDraft(
-                    founder_id="demo-founder",
-                    content_type=ContentType.TWEET,
-                    generated_text="Transform your daily workflow with intelligent automation! 🔧 Our AI assistant learns your patterns and eliminates repetitive tasks. Ready to reclaim your time? #Efficiency #AITools #WorkSmarter",
-                    seo_suggestions=SEOSuggestions(
-                        hashtags=['Efficiency', 'AITools', 'WorkSmarter', 'Automation'],
-                        keywords=['workflow', 'automation', 'ai assistant', 'efficiency'],
-                        trending_tags=['Efficiency', 'AITools'],
-                        optimal_length=240
-                    ),
-                    quality_score=ContentQualityScore(
-                        overall_score=0.78,
-                        engagement_prediction=0.81,
-                        brand_alignment=0.83,
-                        trend_relevance=0.76,
-                        seo_optimization=0.79,
-                        readability=0.85,
-                        issues=[],
-                        suggestions=["Good keyword density", "Strong call-to-action"]
-                    ),
-                    generation_metadata={
-                        'seo_optimized': True,
-                        'seo_quality_score': 0.79,
-                        'keywords_used': ['workflow', 'automation', 'ai assistant'],
-                        'hashtags_suggested': ['Efficiency', 'AITools', 'WorkSmarter'],
-                        'optimization_method': 'seo_optimized_generation'
-                    }
-                )
-            ]
+        # Generate content
+        drafts = await enhanced_generator.generate_content(request, context)
         
-        print(f"\n✅ Generated {len(drafts)} SEO-optimized content drafts:")
-        for i, draft in enumerate(drafts, 1):
-            print(f"\n--- Draft {i} ---")
-            print(f"Content: {draft.generated_text}")
-            print(f"Content Length: {len(draft.generated_text)} characters")
-            print(f"Content Type: {draft.content_type.value}")
+        if drafts:
+            print(f"\n✅ Generated {len(drafts)} content draft(s):")
             
-            if draft.quality_score:
-                print(f"📊 Quality Metrics:")
-                print(f"  • Overall Score: {draft.quality_score.overall_score:.2f}")
-                print(f"  • Engagement Prediction: {draft.quality_score.engagement_prediction:.2f}")
-                print(f"  • SEO Optimization: {draft.quality_score.seo_optimization:.2f}")
-                print(f"  • Brand Alignment: {draft.quality_score.brand_alignment:.2f}")
-                print(f"  • Trend Relevance: {draft.quality_score.trend_relevance:.2f}")
-            
-            if draft.seo_suggestions:
-                print(f"🎯 SEO Elements:")
-                print(f"  • Suggested Hashtags: {', '.join(f'#{h}' for h in draft.seo_suggestions.hashtags)}")
-                print(f"  • Target Keywords: {', '.join(draft.seo_suggestions.keywords)}")
-                print(f"  • Trending Tags: {', '.join(draft.seo_suggestions.trending_tags)}")
-                print(f"  • Optimal Length: {draft.seo_suggestions.optimal_length}")
-            
-            if draft.generation_metadata.get('seo_optimized'):
-                seo_score = draft.generation_metadata.get('seo_quality_score', 0)
-                print(f"🔍 SEO Quality Score: {seo_score:.2f}")
-                print(f"  • Keywords Used: {', '.join(draft.generation_metadata.get('keywords_used', []))}")
-                print(f"  • Optimization Method: {draft.generation_metadata.get('optimization_method', 'unknown')}")
+            for i, draft in enumerate(drafts, 1):
+                print(f"\n--- Draft {i} ---")
+                print(f"Content: {draft.generated_text}")
+                print(f"Length: {len(draft.generated_text)} characters")
+                print(f"Quality Score: {draft.quality_score:.2f}")
+                
+                # Show SEO metrics if available
+                if 'seo_quality_score' in draft.generation_metadata:
+                    seo_score = draft.generation_metadata['seo_quality_score']
+                    print(f"SEO Score: {seo_score:.2f}")
+                
+                if 'seo_keywords_used' in draft.generation_metadata:
+                    keywords = draft.generation_metadata['seo_keywords_used']
+                    print(f"Keywords Used: {', '.join(keywords[:3])}")
+                
+                if 'seo_hashtags_suggested' in draft.generation_metadata:
+                    hashtags = draft.generation_metadata['seo_hashtags_suggested']
+                    print(f"Hashtags: {', '.join(f'#{tag}' for tag in hashtags[:3])}")
+        else:
+            print("❌ No content generated")
         
-        # Simulate storing SEO results
-        print(f"\n💾 Storing SEO optimization results...")
-        for i, draft in enumerate(drafts):
-            optimization_data = {
-                'content_draft_id': f"draft_{i+1}",
-                'seo_quality_score': draft.generation_metadata.get('seo_quality_score', 0),
-                'overall_quality_score': draft.quality_score.overall_score if draft.quality_score else 0,
-                'keywords_used': draft.generation_metadata.get('keywords_used', []),
-                'hashtags_suggested': draft.generation_metadata.get('hashtags_suggested', []),
-                'content_type': draft.content_type.value,
-                'optimization_method': 'integrated_generation',
-                'content_length': len(draft.generated_text)
-            }
-            data_flow_manager.store_seo_optimization_result("demo-founder", optimization_data)
+        print("\n✅ Basic SEO content generation demo completed!")
         
     except Exception as e:
         print(f"❌ Demo failed: {e}")
@@ -531,39 +479,197 @@ def demo_seo_configuration():
     except Exception as e:
         print(f"❌ SEO configuration demo failed: {e}")
 
+async def demo_system_integration():
+    """Demo full system integration"""
+    print("\n🔗 Demo: Full System Integration")
+    
+    try:
+        # Check environment configuration
+        api_key = get_openai_api_key()
+        twitter_creds = get_twitter_credentials()
+        
+        if not api_key:
+            print("⚠️ Skipping system integration demo due to missing OpenAI API key")
+            return
+        
+        print("✅ Environment configuration checked")
+        
+        # Import system components
+        try:
+            from modules.content_generation.service import ContentGenerationService
+            
+            print("✅ System modules imported successfully")
+        except ImportError as e:
+            print(f"⚠️ System module import failed: {e}")
+            print("💡 Running standalone demo instead")
+            await demo_basic_seo_content_generation()
+            return
+        
+        # Initialize system components
+        try:
+            # Mock data flow manager for demo
+            class MockDataFlowManager:
+                def __init__(self):
+                    pass
+                
+                def store_content_draft(self, draft_data):
+                    print(f"📝 Mock: Stored content draft for {draft_data.get('founder_id')}")
+                
+                def store_seo_optimization_result(self, seo_data):
+                    print(f"📊 Mock: Stored SEO result for {seo_data.get('founder_id')}")
+            
+            data_flow_manager = MockDataFlowManager()
+            
+            # Initialize SEO service (optional)
+            seo_service = None
+            try:
+                from modules.seo.service_integration import SEOService
+                seo_service = SEOService(data_flow_manager, None, None)
+                print("✅ SEO service initialized")
+            except Exception as e:
+                print(f"⚠️ SEO service initialization failed: {e}")
+            
+            # LLM configuration
+            llm_config = {
+                'provider': 'openai',
+                'api_key': api_key,
+                'model_name': 'gpt-3.5-turbo'
+            }
+            
+            # Initialize content service
+            content_service = ContentGenerationService(
+                data_flow_manager=data_flow_manager,
+                seo_service=seo_service,
+                llm_config=llm_config
+            )
+            
+            print("✅ System services initialized")
+            
+        except Exception as e:
+            print(f"⚠️ Service initialization failed: {e}")
+            return
+        
+        # Demo content generation with full system
+        founder_id = "demo_founder_123"
+        
+        print(f"\n👤 Generating content for founder: {founder_id}")
+        
+        # Sample trend and product data
+        trend_info = {
+            'topic_name': 'AI productivity tools',
+            'keywords': ['ai', 'productivity', 'automation', 'efficiency'],
+            'pain_points': ['time management', 'workflow optimization'],
+            'trend_potential_score': 0.85
+        }
+        
+        product_info = {
+            'name': 'ProductivityAI',
+            'target_audience': 'busy professionals',
+            'core_values': ['efficiency', 'innovation', 'simplicity'],
+            'industry_category': 'productivity software'
+        }
+        
+        # Generate content through service
+        try:
+            generated_content = await content_service.generate_content_with_seo(
+                founder_id=founder_id,
+                trend_info=trend_info,
+                product_info=product_info,
+                content_type='tweet'
+            )
+            
+            if generated_content:
+                print(f"\n✅ Generated content:")
+                print(f"📝 Content: {generated_content.get('content', 'N/A')}")
+                print(f"📊 SEO Score: {generated_content.get('seo_score', 0):.2f}")
+                print(f"🏷️ Hashtags: {', '.join(generated_content.get('hashtags', []))}")
+                print(f"🔑 Keywords: {', '.join(generated_content.get('keywords_used', []))}")
+            else:
+                print("❌ No content generated")
+                
+        except Exception as e:
+            print(f"⚠️ Content generation failed: {e}")
+        
+        print("\n✅ System integration demo completed!")
+        
+    except Exception as e:
+        print(f"❌ System integration demo failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+async def demo_configuration_check():
+    """Demo configuration validation"""
+    print("\n⚙️ Demo: Configuration Check")
+    
+    print("🔍 Checking environment configuration...")
+    
+    # Check .env file existence
+    env_file = project_root / '.env'
+    if env_file.exists():
+        print("✅ .env file found")
+    else:
+        print("❌ .env file not found")
+        print("💡 Create a .env file in the project root with:")
+        print("   OPENAI_API_KEY=your_openai_api_key")
+        print("   TWITTER_CLIENT_ID=your_twitter_client_id")
+        print("   TWITTER_CLIENT_SECRET=your_twitter_client_secret")
+    
+    # Check OpenAI configuration
+    openai_key = get_openai_api_key()
+    if openai_key:
+        print(f"✅ OpenAI API key configured (length: {len(openai_key)})")
+    else:
+        print("❌ OpenAI API key not configured")
+    
+    # Check Twitter configuration
+    twitter_creds = get_twitter_credentials()
+    configured_creds = [k for k, v in twitter_creds.items() if v]
+    if configured_creds:
+        print(f"✅ Twitter credentials configured: {', '.join(configured_creds)}")
+    else:
+        print("❌ No Twitter credentials configured")
+    
+    # Check required packages
+    required_packages = ['openai', 'python-dotenv', 'pydantic']
+    for package in required_packages:
+        try:
+            __import__(package)
+            print(f"✅ {package} package available")
+        except ImportError:
+            print(f"❌ {package} package not installed")
+            print(f"   Install with: pip install {package}")
+
 async def main():
-    """Run all enhanced demos with SEO integration"""
-    print("🚀 Enhanced ContentGenerationModule Demo with SEO Integration")
-    print("=" * 70)
+    """Run all content generation demos"""
+    print("🚀 Content Generation Module Demo with SEO Integration")
+    print("=" * 60)
     
-    # Run all demos
+    # Check configuration first
+    await demo_configuration_check()
+    
+    print("\n" + "=" * 60)
+    
+    # Run demos
     await demo_basic_seo_content_generation()
-    await demo_seo_performance_analysis() 
     await demo_comprehensive_seo_workflow()
-    demo_seo_configuration()
+    await demo_system_integration()
     
-    print("\n" + "=" * 70)
-    print("🎉 Enhanced Demo with SEO Integration Completed!")
-    print("\n🔍 Key SEO Features Demonstrated:")
-    print("✅ SEO-optimized content generation")
-    print("✅ Real-time SEO quality scoring")
-    print("✅ Intelligent hashtag and keyword optimization")
-    print("✅ SEO performance tracking and analytics")
-    print("✅ Comprehensive SEO workflow integration")
-    print("✅ Personalized SEO recommendations")
+    print("\n" + "=" * 60)
+    print("🎉 Content Generation Demo Completed!")
     
-    print("\n💡 To use with real APIs:")
-    print("1. Set OPENAI_API_KEY in .env file")
-    print("2. Configure Twitter API credentials")
-    print("3. Set up database connections")
-    print("4. Run: python -m modules.content_generation.enhanced_demo")
+    print("\n📋 Configuration Checklist:")
+    print("1. ✅ Create .env file in project root")
+    print("2. ✅ Add OPENAI_API_KEY to .env file")
+    print("3. ⚠️ Add Twitter API credentials (optional)")
+    print("4. ✅ Install required packages: pip install openai python-dotenv pydantic")
     
-    print("\n📊 SEO Integration Benefits:")
-    print("• 25-40% improvement in content discoverability")
-    print("• Automated hashtag optimization")
-    print("• Real-time SEO scoring and feedback")
-    print("• Performance tracking and analytics")
-    print("• Trend-based content optimization")
+    print("\n💡 Sample .env file:")
+    print("```")
+    print("OPENAI_API_KEY=sk-your-openai-api-key-here")
+    print("TWITTER_CLIENT_ID=your-twitter-client-id")
+    print("TWITTER_CLIENT_SECRET=your-twitter-client-secret")
+    print("TWITTER_BEARER_TOKEN=your-twitter-bearer-token")
+    print("```")
 
 if __name__ == "__main__":
     asyncio.run(main())

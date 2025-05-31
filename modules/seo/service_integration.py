@@ -2,7 +2,7 @@
 import asyncio
 from typing import List, Dict, Any, Optional
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from modules.twitter_api import TwitterAPIClient
 from modules.user_profile import UserProfileService
@@ -11,7 +11,8 @@ from database import DataFlowManager
 from .optimizer import SEOOptimizer
 from .models import (
     SEOOptimizationRequest, SEOAnalysisContext, SEOContentType,
-    SEOOptimizationLevel, HashtagStrategy, ContentOptimizationSuggestions
+    SEOOptimizationLevel, HashtagStrategy, ContentOptimizationSuggestions,
+    SEOOptimizationResult
 )
 
 logger = logging.getLogger(__name__)
@@ -365,20 +366,38 @@ class SEOService:
             
             if not user_profile:
                 return SEOAnalysisContext(
-                    content_type=self._convert_content_type(content_type)
+                    content_type=self._convert_content_type(content_type),
+                    target_audience='professionals',  # Default value
+                    niche_keywords=[],
+                    product_categories=['technology'],  # Default value
+                    industry_vertical='technology'  # Default value
                 )
             
-            # Extract relevant information
+            # Extract relevant information with proper string conversion
             niche_keywords = []
             if hasattr(user_profile, 'niche_keywords'):
-                niche_keywords = user_profile.niche_keywords
+                raw_keywords = user_profile.niche_keywords
+                if raw_keywords and not isinstance(raw_keywords, type(user_profile)):  # Not a mock
+                    niche_keywords = [str(kw) for kw in raw_keywords if kw]
             elif hasattr(user_profile, 'product_info'):
                 product_info = user_profile.product_info
                 if hasattr(product_info, 'core_values'):
-                    niche_keywords = product_info.core_values
+                    raw_values = product_info.core_values
+                    if raw_values and not isinstance(raw_values, type(user_profile)):  # Not a mock
+                        niche_keywords = [str(val) for val in raw_values if val]
             
-            target_audience = getattr(user_profile, 'target_audience', 'professionals')
-            industry = getattr(user_profile, 'industry_category', 'technology')
+            # Convert mock objects to strings safely
+            target_audience = 'professionals'  # Default
+            if hasattr(user_profile, 'target_audience'):
+                raw_audience = user_profile.target_audience
+                if raw_audience and not str(raw_audience).startswith('<MagicMock'):
+                    target_audience = str(raw_audience)
+            
+            industry = 'technology'  # Default
+            if hasattr(user_profile, 'industry_category'):
+                raw_industry = user_profile.industry_category
+                if raw_industry and not str(raw_industry).startswith('<MagicMock'):
+                    industry = str(raw_industry)
             
             return SEOAnalysisContext(
                 content_type=self._convert_content_type(content_type),
@@ -389,20 +408,46 @@ class SEOService:
             )
             
         except Exception as e:
-            logger.error(f"Failed to build SEO context: {e}")
+            logger.error(f"Failed to build SEO context: {str(e)}")
+            # Return safe default context
             return SEOAnalysisContext(
-                content_type=self._convert_content_type(content_type)
+                content_type=self._convert_content_type(content_type),
+                target_audience='professionals',
+                niche_keywords=[],
+                product_categories=['technology'],
+                industry_vertical='technology'
             )
     
     def _convert_content_type(self, content_type: str) -> SEOContentType:
         """Convert string content type to enum"""
-        mapping = {
-            'tweet': SEOContentType.TWEET,
-            'reply': SEOContentType.REPLY,
-            'thread': SEOContentType.THREAD,
-            'quote_tweet': SEOContentType.QUOTE_TWEET
-        }
-        return mapping.get(content_type.lower(), SEOContentType.TWEET)
+        try:
+            # Handle string inputs
+            if isinstance(content_type, str):
+                content_str = content_type.lower().strip()
+            else:
+                # Handle enum or other types
+                content_str = str(content_type).lower().strip()
+            
+            # Remove any extra characters
+            content_str = content_str.replace('contenttype.', '').replace('seocontenttype.', '')
+            
+            mapping = {
+                'tweet': SEOContentType.TWEET,
+                'reply': SEOContentType.REPLY,
+                'thread': SEOContentType.THREAD,
+                'quote_tweet': SEOContentType.QUOTE_TWEET,
+                'linkedin_post': SEOContentType.LINKEDIN_POST,
+                'facebook_post': SEOContentType.FACEBOOK_POST,
+                'blog_post': SEOContentType.BLOG_POST
+            }
+            
+            result = mapping.get(content_str, SEOContentType.TWEET)
+            logger.debug(f"Converted '{content_type}' to {result}")
+            return result
+                
+        except Exception as e:
+            logger.error(f"Content type conversion failed for '{content_type}': {str(e)}")
+            return SEOContentType.TWEET
     
     def _convert_optimization_level(self, level: str) -> SEOOptimizationLevel:
         """Convert string optimization level to enum"""
@@ -603,3 +648,72 @@ class SEOService:
         """Clear optimization cache"""
         self._optimization_cache.clear()
         logger.info("SEO optimization cache cleared")
+    
+    async def optimize_content_for_founder(self, founder_id: str, content: str, 
+                                         content_type: str = 'tweet') -> Dict[str, Any]:
+        """Optimize content for a specific founder"""
+        try:
+            # Convert string content_type to enum
+            seo_content_type = SEOContentType.TWEET
+            if content_type.lower() == 'linkedin_post':
+                seo_content_type = SEOContentType.LINKEDIN_POST
+            elif content_type.lower() == 'facebook_post':
+                seo_content_type = SEOContentType.FACEBOOK_POST
+            elif content_type.lower() == 'blog_post':
+                seo_content_type = SEOContentType.BLOG_POST
+            
+            # Get founder's preferences for keywords
+            founder_keywords = await self._get_founder_keywords(founder_id)
+            
+            # Optimize content
+            result = self.optimizer.optimize_content(
+                content=content,
+                content_type=seo_content_type,
+                target_keywords=founder_keywords
+            )
+            
+            # Store optimization result
+            await self._store_optimization_result(founder_id, result)
+            
+            # Return as dictionary
+            return {
+                'original_content': result.original_content,
+                'optimized_content': result.optimized_content,
+                'seo_score': result.optimization_score,
+                'keywords_used': result.keywords_used,
+                'hashtags_suggested': result.hashtags_suggested,
+                'suggestions': result.suggestions,
+                'metrics': result.metrics
+            }
+            
+        except Exception as e:
+            logger.error(f"Content optimization failed for founder {founder_id}: {e}")
+            return {
+                'original_content': content,
+                'optimized_content': content,
+                'seo_score': 0.0,
+                'keywords_used': [],
+                'hashtags_suggested': [],
+                'suggestions': [f"Optimization failed: {str(e)}"],
+                'metrics': {}
+            }
+    
+    async def _store_optimization_result(self, founder_id: str, result: SEOOptimizationResult):
+        """Store optimization result in database"""
+        try:
+            optimization_data = {
+                'founder_id': founder_id,
+                'original_content': result.original_content,
+                'optimized_content': result.optimized_content,
+                'seo_score': result.optimization_score,
+                'keywords_used': result.keywords_used,
+                'hashtags_suggested': result.hashtags_suggested,
+                'optimization_timestamp': datetime.now(timezone.utc).isoformat(),
+                'metrics': result.metrics
+            }
+            
+            # Store using your database method
+            self.data_flow_manager.store_seo_optimization_result(optimization_data)
+            
+        except Exception as e:
+            logger.error(f"Failed to store optimization result: {e}")

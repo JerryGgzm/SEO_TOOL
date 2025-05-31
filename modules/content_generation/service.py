@@ -10,7 +10,7 @@ from modules.seo.service_integration import SEOService
 
 from .models import (
     ContentDraft, ContentType, ContentGenerationRequest, 
-    ContentGenerationContext, BrandVoice, SEOSuggestions
+    ContentGenerationContext, BrandVoice, SEOSuggestions, GenerationMode
 )
 from .generator import ContentGenerator, ContentGenerationFactory
 from .database_adapter import ContentGenerationDatabaseAdapter
@@ -23,16 +23,14 @@ class ContentGenerationService:
     """
     
     def __init__(self, data_flow_manager: DataFlowManager,
-                 user_profile_service: UserProfileService,
                  seo_service: SEOService,
                  llm_config: Dict[str, Any]):
         
         self.data_flow_manager = data_flow_manager
-        self.user_profile_service = user_profile_service
         self.seo_service = seo_service
         
         # Initialize enhanced content generator with SEO integration
-        self.content_generator = ContentGenerationFactory.create_enhanced_generator(
+        self.generator = ContentGenerationFactory.create_enhanced_generator(
             llm_provider=llm_config.get('provider', 'openai'),
             llm_config=llm_config,
             seo_optimizer=seo_service.optimizer if seo_service else None
@@ -63,7 +61,7 @@ class ContentGenerationService:
                 return []
             
             # Generate SEO-optimized content
-            content_drafts = await self.content_generator.generate_content(request, generation_context)
+            content_drafts = await self.generator.generate_content(request, generation_context)
             
             if not content_drafts:
                 logger.warning(f"No content generated for founder {founder_id}")
@@ -94,7 +92,7 @@ class ContentGenerationService:
             logger.error(f"Enhanced content generation failed for founder {founder_id}: {e}")
             return []
     
-    async def generate_seo_optimized_content(self, founder_id: str, trend_id: str,
+    async def generate_seo_optimized_content(self, founder_id: str, trend_id: str = None,
                                            content_type: ContentType = ContentType.TWEET,
                                            optimization_level: str = "moderate",
                                            quantity: int = 3) -> List[str]:
@@ -106,7 +104,7 @@ class ContentGenerationService:
             trend_id=trend_id,
             quantity=quantity,
             include_seo=True,
-            generation_strategy="seo_optimized"  # Use SEO-focused generation
+            generation_mode=GenerationMode.SEO_OPTIMIZED
         )
         
         return await self.generate_content_for_founder(founder_id, request)
@@ -400,7 +398,7 @@ class ContentGenerationService:
                 enhanced_feedback = f"{feedback}\n\nSEO Improvements: {seo_feedback}"
             
             # Use the enhanced generator's regeneration method
-            new_draft = await self.content_generator.regenerate_content(
+            new_draft = await self.generator.regenerate_content(
                 original_draft, generation_context, enhanced_feedback
             )
             
@@ -580,3 +578,75 @@ class ContentGenerationService:
         except Exception as e:
             logger.error(f"Failed to get content generation statistics: {e}")
             return {}
+
+    async def generate_content_with_seo(self, founder_id: str, trend_info: Dict[str, Any],
+                                      product_info: Dict[str, Any], content_type: str = 'tweet',
+                                      quantity: int = 1) -> Optional[Dict[str, Any]]:
+        """
+        Generate content with SEO optimization using trend and product info
+        
+        Args:
+            founder_id: Founder ID
+            trend_info: Trend information dictionary
+            product_info: Product information dictionary  
+            content_type: Type of content to generate
+            quantity: Number of drafts to generate
+            
+        Returns:
+            Generated content with SEO metrics
+        """
+        try:
+            # Convert string content type to enum
+            if isinstance(content_type, str):
+                content_type_enum = ContentType(content_type.lower())
+            else:
+                content_type_enum = content_type
+            
+            # Create generation request
+            request = ContentGenerationRequest(
+                founder_id=founder_id,
+                content_type=content_type_enum,
+                generation_mode=GenerationMode.SEO_OPTIMIZED,
+                quantity=quantity,
+                include_seo=True,
+                quality_threshold=0.3  # Lower threshold for demo
+            )
+            
+            # Create generation context
+            context = ContentGenerationContext(
+                trend_info=trend_info,
+                product_info=product_info,
+                target_audience=product_info.get('target_audience', 'professionals'),
+                content_preferences={
+                    'include_hashtags': True,
+                    'max_length': 250,
+                    'tone': 'professional'
+                }
+            )
+            
+            # Generate content
+            drafts = await self.generator.generate_content(request, context)
+            
+            if drafts:
+                # Return the best draft
+                best_draft = max(drafts, key=lambda d: d.quality_score)
+                
+                result = {
+                    'content': best_draft.generated_text,
+                    'seo_score': best_draft.generation_metadata.get('seo_quality_score', 0),
+                    'quality_score': best_draft.quality_score,
+                    'hashtags': best_draft.seo_suggestions.hashtags,
+                    'keywords_used': best_draft.generation_metadata.get('seo_keywords_used', []),
+                    'draft_id': best_draft.id
+                }
+                
+                # Store in database
+                self._store_seo_optimization_results(founder_id, best_draft, best_draft.id)
+                
+                return result
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Content generation with SEO failed: {e}")
+            return None

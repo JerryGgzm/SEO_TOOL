@@ -3,7 +3,7 @@ from typing import Dict, Any, List, Optional
 import re
 from datetime import datetime
 
-from .models import ContentType, ContentGenerationContext, BrandVoice, PromptTemplate
+from .models import ContentType, ContentGenerationContext, BrandVoice, PromptTemplate, ContentGenerationRequest, GenerationMode
 
 class ContentPromptTemplates:
     """Collection of prompt templates for different content types"""
@@ -207,9 +207,13 @@ class PromptEngine:
     def __init__(self):
         self.templates = ContentPromptTemplates()
     
-    def generate_prompt(self, content_type: ContentType, context: ContentGenerationContext, 
+    def generate_prompt(self, request: ContentGenerationRequest, 
+                       context: ContentGenerationContext, 
                        prompt_type: str = "default") -> str:
         """Generate a complete prompt for content generation"""
+        
+        # Extract content type from request
+        content_type = request.content_type
         
         # Get system prompt
         system_prompt = self.templates.SYSTEM_PROMPTS.get(content_type, "")
@@ -217,16 +221,16 @@ class PromptEngine:
         # Get content template
         content_templates = self.templates.CONTENT_TEMPLATES.get(content_type, {})
         
-        # Determine best template based on context
+        # Determine best template based on context and request
         if prompt_type == "default":
-            prompt_type = self._determine_optimal_template(content_type, context)
+            prompt_type = self._determine_optimal_template(content_type, context, request)
         
         template = content_templates.get(prompt_type)
         if not template:
             template = self._get_fallback_template(content_type)
         
         # Fill template with context data
-        filled_template = self._fill_template(template, context)
+        filled_template = self._fill_template(template, context, request)
         
         # Combine system prompt and content prompt
         full_prompt = f"{system_prompt}\n\n{filled_template}"
@@ -234,9 +238,20 @@ class PromptEngine:
         return full_prompt
     
     def _determine_optimal_template(self, content_type: ContentType, 
-                                  context: ContentGenerationContext) -> str:
-        """Determine the best template based on context"""
+                                  context: ContentGenerationContext,
+                                  request: ContentGenerationRequest) -> str:
+        """Determine the best template based on context and request"""
         
+        # Check generation mode first
+        if request.generation_mode == GenerationMode.SEO_OPTIMIZED:
+            if content_type == ContentType.TWEET:
+                return "trend_based" if context.trend_info else "product_focused"
+        elif request.generation_mode == GenerationMode.VIRAL_FOCUSED:
+            return "educational" if content_type == ContentType.TWEET else "supportive"
+        elif request.generation_mode == GenerationMode.TREND_BASED:
+            return "trend_based" if context.trend_info else "educational"
+        
+        # Original logic for backward compatibility
         if content_type == ContentType.TWEET:
             # If we have trend info, use trend-based template
             if context.trend_info:
@@ -264,7 +279,8 @@ class PromptEngine:
         
         return "default"
     
-    def _fill_template(self, template: str, context: ContentGenerationContext) -> str:
+    def _fill_template(self, template: str, context: ContentGenerationContext, 
+                      request: ContentGenerationRequest) -> str:
         """Fill template placeholders with context data"""
         
         # Extract product info
@@ -308,7 +324,12 @@ class PromptEngine:
             "complexity_level": "intermediate",
             
             # Handle original tweet for replies
-            "original_tweet": context.content_preferences.get("original_tweet", "a recent industry discussion")
+            "original_tweet": context.content_preferences.get("original_tweet", "a recent industry discussion"),
+            
+            # Request-specific information
+            "founder_id": request.founder_id,
+            "generation_mode": request.generation_mode.value,
+            "custom_instructions": request.custom_prompt or "No additional instructions"
         }
         
         # Fill template

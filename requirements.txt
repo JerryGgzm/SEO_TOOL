@@ -78,3 +78,6 @@ isort==5.12.0
 
 # Background tasks (optional, for future use)
 celery==5.3.4
+
+# Other dependencies
+python-dotenv>=1.0.0

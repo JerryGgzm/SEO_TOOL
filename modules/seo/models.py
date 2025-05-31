@@ -1,24 +1,19 @@
 """SEO optimization data models"""
 from typing import List, Optional, Dict, Any, Union
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, validator
 from datetime import datetime
 from enum import Enum
 
-class SEOContentType(str, Enum):
-    """Content types for SEO optimization"""
+class SEOContentType(Enum):
     TWEET = "tweet"
-    REPLY = "reply"
-    THREAD = "thread"
-    QUOTE_TWEET = "quote_tweet"
-    BIO = "bio"
-    PROFILE = "profile"
+    LINKEDIN_POST = "linkedin_post"
+    FACEBOOK_POST = "facebook_post"
+    BLOG_POST = "blog_post"
 
-class SEOOptimizationLevel(str, Enum):
-    """SEO optimization levels"""
-    BASIC = "basic"
+class SEOOptimizationLevel(Enum):
+    LIGHT = "light"
     MODERATE = "moderate"
     AGGRESSIVE = "aggressive"
-    CUSTOM = "custom"
 
 class HashtagStrategy(str, Enum):
     """Hashtag optimization strategies"""
@@ -82,29 +77,29 @@ class SEOAnalysisContext(BaseModel):
     industry_vertical: Optional[str] = Field(None, description="Industry vertical")
 
 class SEOOptimizationRequest(BaseModel):
-    """Request for SEO optimization"""
-    content: str = Field(..., min_length=1, description="Content to optimize")
-    content_type: SEOContentType = Field(..., description="Content type")
+    """Request model for SEO optimization"""
+    content: str = Field(..., description="Content to optimize")
+    content_type: SEOContentType = Field(default=SEOContentType.TWEET)
     optimization_level: SEOOptimizationLevel = Field(default=SEOOptimizationLevel.MODERATE)
-    hashtag_strategy: HashtagStrategy = Field(default=HashtagStrategy.ENGAGEMENT_OPTIMIZED)
-    max_hashtags: int = Field(default=5, ge=1, le=30, description="Maximum hashtags to suggest")
-    max_keywords: int = Field(default=10, ge=1, le=50, description="Maximum keywords to suggest")
-    context: SEOAnalysisContext = Field(..., description="Analysis context")
-    preserve_original_tone: bool = Field(default=True, description="Maintain original tone")
-    include_trending_tags: bool = Field(default=True, description="Include trending hashtags")
+    target_keywords: List[str] = Field(default_factory=list)
+    include_hashtags: bool = Field(default=True)
+    include_trending_tags: bool = Field(default=True)
+    max_length: Optional[int] = Field(default=None)
 
 class SEOOptimizationResult(BaseModel):
-    """Result of SEO optimization"""
+    """Result model for SEO optimization"""
     original_content: str = Field(..., description="Original content")
-    optimized_content: str = Field(..., description="SEO optimized content")
-    optimization_score: float = Field(..., ge=0, le=1, description="Overall optimization score")
-    improvements_made: List[str] = Field(default=[], description="List of improvements made")
-    suggestions: ContentOptimizationSuggestions = Field(..., description="Optimization suggestions")
-    hashtag_analysis: List[HashtagMetrics] = Field(default=[], description="Hashtag analysis")
-    keyword_analysis: List[KeywordAnalysis] = Field(default=[], description="Keyword analysis")
-    seo_score_breakdown: Dict[str, float] = Field(default={}, description="Detailed score breakdown")
-    estimated_reach_improvement: float = Field(default=0.0, description="Estimated reach improvement %")
-    optimization_metadata: Dict[str, Any] = Field(default={}, description="Optimization metadata")
+    optimized_content: str = Field(..., description="Optimized content")
+    optimization_score: float = Field(..., description="SEO optimization score (0-1)")
+    suggestions: List[str] = Field(default_factory=list, description="Applied optimization suggestions")
+    keywords_used: List[str] = Field(default_factory=list, description="Keywords used in optimization")
+    hashtags_suggested: List[str] = Field(default_factory=list, description="Hashtags suggested")
+    metrics: Dict[str, Any] = Field(default_factory=dict, description="Additional metrics")
+    
+    @validator('optimization_score')
+    def validate_score(cls, v):
+        """Ensure score is between 0 and 1"""
+        return max(0.0, min(1.0, v))
 
 class CompetitorHashtagAnalysis(BaseModel):
     """Competitor hashtag analysis"""
@@ -178,3 +173,12 @@ class KeywordOptimizationRequest(BaseModel):
     keyword_density_target: float = Field(default=0.02, ge=0, le=0.1, description="Target keyword density")
     preserve_readability: bool = Field(default=True, description="Maintain content readability")
     content_type: SEOContentType = Field(..., description="Content type")
+
+class ContentSuggestions(BaseModel):
+    """Content suggestions for SEO optimization"""
+    recommended_hashtags: List[str] = Field(default_factory=list)
+    primary_keywords: List[str] = Field(default_factory=list)
+    secondary_keywords: List[str] = Field(default_factory=list)
+    optimal_length: int = Field(default=280)
+    call_to_action: str = Field(default="")
+    trending_topics: List[str] = Field(default_factory=list)

@@ -248,20 +248,24 @@ class LLMAdapterFactory:
     @staticmethod
     def create_adapter(provider: str, **kwargs) -> LLMAdapter:
         """Create LLM adapter based on provider"""
+        
+        # Ensure provider is not in kwargs to avoid duplication
+        clean_kwargs = {k: v for k, v in kwargs.items() if k != 'provider'}
+        
         if provider.lower() == "openai":
             return OpenAIAdapter(
-                api_key=kwargs.get('api_key'),
-                model_name=kwargs.get('model_name', 'gpt-3.5-turbo')
+                api_key=clean_kwargs.get('api_key'),
+                model_name=clean_kwargs.get('model_name', 'gpt-3.5-turbo')
             )
-        elif provider.lower() == "claude":
+        elif provider.lower() == "anthropic":
             return ClaudeAdapter(
-                api_key=kwargs.get('api_key'),
-                model_name=kwargs.get('model_name', 'claude-3-sonnet-20240229')
+                api_key=clean_kwargs.get('api_key'),
+                model_name=clean_kwargs.get('model_name', 'claude-3-sonnet-20240229')
             )
         elif provider.lower() == "local":
             return LocalLLMAdapter(
-                model_name=kwargs.get('model_name', 'llama2'),
-                base_url=kwargs.get('base_url', 'http://localhost:11434')
+                model_name=clean_kwargs.get('model_name', 'llama2'),
+                base_url=clean_kwargs.get('base_url', 'http://localhost:11434')
             )
         else:
             raise ValueError(f"Unsupported LLM provider: {provider}")
