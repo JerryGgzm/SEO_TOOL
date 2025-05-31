@@ -1,4 +1,4 @@
-"""Content generation service - Database integration layer"""
+"""Enhanced content generation service with SEO integration"""
 import asyncio
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta
@@ -6,6 +6,7 @@ import logging
 
 from database import DataFlowManager
 from modules.user_profile import UserProfileService
+from modules.seo.service_integration import SEOService
 
 from .models import (
     ContentDraft, ContentType, ContentGenerationRequest, 
@@ -18,24 +19,23 @@ logger = logging.getLogger(__name__)
 
 class ContentGenerationService:
     """
-    High-level content generation service following DFD 3 data flow
-    Orchestrates the complete content generation and storage workflow
+    Enhanced content generation service with full SEO integration
     """
     
     def __init__(self, data_flow_manager: DataFlowManager,
                  user_profile_service: UserProfileService,
-                 llm_config: Dict[str, Any],
-                 seo_module=None):
+                 seo_service: SEOService,
+                 llm_config: Dict[str, Any]):
         
         self.data_flow_manager = data_flow_manager
         self.user_profile_service = user_profile_service
-        self.seo_module = seo_module
+        self.seo_service = seo_service
         
-        # Initialize content generator
-        self.content_generator = ContentGenerationFactory.create_generator(
+        # Initialize enhanced content generator with SEO integration
+        self.content_generator = ContentGenerationFactory.create_enhanced_generator(
             llm_provider=llm_config.get('provider', 'openai'),
             llm_config=llm_config,
-            seo_module=seo_module
+            seo_optimizer=seo_service.optimizer if seo_service else None
         )
         
         # Database adapter for converting models
@@ -44,7 +44,7 @@ class ContentGenerationService:
     async def generate_content_for_founder(self, founder_id: str, 
                                          request: ContentGenerationRequest) -> List[str]:
         """
-        Main content generation workflow following DFD 3 steps 1-8
+        Enhanced content generation with SEO optimization
         
         Args:
             founder_id: Founder's ID
@@ -54,83 +54,96 @@ class ContentGenerationService:
             List of created draft IDs
         """
         try:
-            logger.info(f"Starting content generation for founder {founder_id}")
+            logger.info(f"Starting enhanced content generation for founder {founder_id}")
             
-            # DFD 3 Step 2: Get user context from UserProfileModule
-            generation_context = await self._build_generation_context(founder_id, request)
+            # Build generation context with SEO integration
+            generation_context = await self._build_enhanced_generation_context(founder_id, request)
             if not generation_context:
                 logger.warning(f"Could not build generation context for founder {founder_id}")
                 return []
             
-            # DFD 3 Steps 4-7: Generate content (includes SEO integration and LLM calls)
+            # Generate SEO-optimized content
             content_drafts = await self.content_generator.generate_content(request, generation_context)
             
             if not content_drafts:
                 logger.warning(f"No content generated for founder {founder_id}")
                 return []
             
-            # DFD 3 Step 8: Store drafts in database with pending_review status
+            # Store drafts and SEO optimization results
             draft_ids = []
             for draft in content_drafts:
                 try:
-                    # Convert to database format
+                    # Store content draft
                     draft_data = self.db_adapter.to_database_format(draft)
-                    
-                    # Store in database via DataFlowManager
                     draft_id = self.data_flow_manager.store_generated_content_draft(draft_data)
+                    
                     if draft_id:
                         draft_ids.append(draft_id)
+                        
+                        # Store SEO optimization results for analytics
+                        await self._store_seo_optimization_results(founder_id, draft, draft_id)
                         
                 except Exception as e:
                     logger.error(f"Failed to store content draft: {e}")
                     continue
             
-            logger.info(f"Generated and stored {len(draft_ids)} content drafts for founder {founder_id}")
+            logger.info(f"Generated and stored {len(draft_ids)} SEO-optimized drafts for founder {founder_id}")
             return draft_ids
             
         except Exception as e:
-            logger.error(f"Content generation failed for founder {founder_id}: {e}")
+            logger.error(f"Enhanced content generation failed for founder {founder_id}: {e}")
             return []
     
-    async def generate_trend_based_content(self, founder_id: str, trend_id: str,
-                                         content_type: ContentType = ContentType.TWEET,
-                                         quantity: int = 3) -> List[str]:
-        """Generate content based on specific trend"""
+    async def generate_seo_optimized_content(self, founder_id: str, trend_id: str,
+                                           content_type: ContentType = ContentType.TWEET,
+                                           optimization_level: str = "moderate",
+                                           quantity: int = 3) -> List[str]:
+        """Generate content with specific SEO optimization level"""
         
         request = ContentGenerationRequest(
             founder_id=founder_id,
             content_type=content_type,
             trend_id=trend_id,
             quantity=quantity,
-            include_seo=True
+            include_seo=True,
+            generation_strategy="seo_optimized"  # Use SEO-focused generation
         )
         
         return await self.generate_content_for_founder(founder_id, request)
     
-    async def generate_reply_content(self, founder_id: str, source_tweet_id: str,
-                                   quantity: int = 2) -> List[str]:
-        """Generate reply content for specific tweet"""
+    async def generate_content_with_custom_seo(self, founder_id: str,
+                                             content_type: ContentType,
+                                             custom_keywords: List[str],
+                                             custom_hashtags: List[str],
+                                             quantity: int = 2) -> List[str]:
+        """Generate content with custom SEO parameters"""
+        
+        # Create custom SEO suggestions
+        custom_seo = SEOSuggestions(
+            hashtags=custom_hashtags,
+            keywords=custom_keywords,
+            mentions=[],
+            trending_tags=[],
+            optimal_length=None
+        )
         
         request = ContentGenerationRequest(
             founder_id=founder_id,
-            content_type=ContentType.REPLY,
-            source_tweet_id=source_tweet_id,
+            content_type=content_type,
             quantity=quantity,
-            include_seo=False  # Replies typically don't need heavy SEO
+            include_seo=True,
+            custom_seo_suggestions=custom_seo
         )
         
         return await self.generate_content_for_founder(founder_id, request)
     
-    async def _build_generation_context(self, founder_id: str, 
-                                      request: ContentGenerationRequest) -> Optional[ContentGenerationContext]:
+    async def _build_enhanced_generation_context(self, founder_id: str, 
+                                               request: ContentGenerationRequest) -> Optional[ContentGenerationContext]:
         """
-        Build comprehensive generation context following DFD 3 steps 2-3
-        
-        DFD 3 Step 2: Get product info, user profile, content style preferences from UserProfileModule
-        DFD 3 Step 3: Get analyzed trends data from database
+        Build enhanced generation context with SEO integration
         """
         try:
-            # Get founder context from DataFlowManager (includes product info, settings, etc.)
+            # Get founder context from DataFlowManager
             founder_context = self.data_flow_manager.get_content_generation_context(
                 founder_id, request.trend_id
             )
@@ -142,7 +155,6 @@ class ContentGenerationService:
             # Extract product information
             product_info = {}
             if founder_context.get('products'):
-                # Use first product for now (could be enhanced to select best match)
                 product = founder_context['products'][0]
                 product_info = {
                     'name': product['name'],
@@ -153,17 +165,25 @@ class ContentGenerationService:
                     'industry_category': product.get('niche_definition', {}).get('category', 'technology')
                 }
             
-            # Build brand voice from founder settings and product info
+            # Build enhanced brand voice
             brand_voice = self._build_brand_voice(founder_context, product_info)
             
-            # Get trend information if specified
+            # Get trend information with SEO enhancement
             trend_info = founder_context.get('trend_info')
+            if trend_info and self.seo_service:
+                # Enhance trend info with SEO insights
+                trend_info = await self._enhance_trend_info_with_seo(trend_info, product_info)
+            
+            # Get SEO-enhanced content preferences
+            content_preferences = await self._get_seo_enhanced_preferences(
+                founder_id, request.content_type, product_info, trend_info
+            )
             
             # Get recent content to avoid repetition
             recent_content = founder_context.get('recent_topics', [])
             
-            # Get successful content patterns
-            successful_patterns = founder_context.get('successful_content_patterns', [])
+            # Get successful content patterns with SEO metrics
+            successful_patterns = await self._get_seo_enhanced_patterns(founder_id)
             
             # Build target audience description
             target_audience = product_info.get('target_audience', 'professionals in technology')
@@ -176,18 +196,144 @@ class ContentGenerationService:
                 recent_content=recent_content,
                 successful_patterns=successful_patterns,
                 target_audience=target_audience,
-                content_preferences=founder_context.get('content_generation_preferences', {})
+                content_preferences=content_preferences
             )
             
         except Exception as e:
-            logger.error(f"Failed to build generation context: {e}")
+            logger.error(f"Failed to build enhanced generation context: {e}")
             return None
+    
+    async def _enhance_trend_info_with_seo(self, trend_info: Dict[str, Any], 
+                                         product_info: Dict[str, Any]) -> Dict[str, Any]:
+        """Enhance trend info with SEO insights"""
+        
+        try:
+            if not self.seo_service:
+                return trend_info
+            
+            # Get SEO suggestions for the trend
+            seo_suggestions = await self.seo_service.get_content_suggestions(
+                trend_info=trend_info,
+                product_info=product_info,
+                content_type='tweet'
+            )
+            
+            # Enhance trend info with SEO data
+            enhanced_trend_info = trend_info.copy()
+            enhanced_trend_info.update({
+                'seo_keywords': seo_suggestions.primary_keywords + seo_suggestions.secondary_keywords,
+                'seo_hashtags': seo_suggestions.recommended_hashtags,
+                'trending_terms': seo_suggestions.trending_terms,
+                'seo_enhanced': True
+            })
+            
+            return enhanced_trend_info
+            
+        except Exception as e:
+            logger.warning(f"Failed to enhance trend info with SEO: {e}")
+            return trend_info
+    
+    async def _get_seo_enhanced_preferences(self, founder_id: str, content_type: ContentType,
+                                          product_info: Dict[str, Any], 
+                                          trend_info: Dict[str, Any]) -> Dict[str, Any]:
+        """Get content preferences enhanced with SEO data"""
+        
+        try:
+            base_preferences = {}
+            
+            # Get SEO recommendations for this founder
+            if self.seo_service:
+                seo_recommendations = self.seo_service.get_seo_recommendations(founder_id)
+                
+                if seo_recommendations:
+                    base_preferences.update({
+                        'seo_strategy': seo_recommendations.get('hashtag_strategy', {}),
+                        'keyword_focus': seo_recommendations.get('keyword_focus', {}),
+                        'content_optimization': seo_recommendations.get('content_optimization', {}),
+                        'seo_recommendations': seo_recommendations
+                    })
+            
+            # Add trend-specific SEO preferences
+            if trend_info and trend_info.get('seo_enhanced'):
+                base_preferences.update({
+                    'trend_seo_keywords': trend_info.get('seo_keywords', []),
+                    'trend_seo_hashtags': trend_info.get('seo_hashtags', []),
+                    'trending_terms': trend_info.get('trending_terms', [])
+                })
+            
+            return base_preferences
+            
+        except Exception as e:
+            logger.warning(f"Failed to get SEO enhanced preferences: {e}")
+            return {}
+    
+    async def _get_seo_enhanced_patterns(self, founder_id: str) -> List[Dict[str, Any]]:
+        """Get successful content patterns enhanced with SEO performance data"""
+        
+        try:
+            # Get base successful patterns
+            base_patterns = []
+            
+            # Get SEO performance history
+            if self.seo_service:
+                seo_analytics = self.seo_service.get_seo_analytics_summary(founder_id)
+                
+                if seo_analytics and seo_analytics.get('best_performing_hashtags'):
+                    # Create patterns based on SEO performance
+                    best_hashtags = seo_analytics['best_performing_hashtags']
+                    
+                    for hashtag in best_hashtags[:3]:
+                        base_patterns.append({
+                            'content_type': 'tweet',
+                            'pattern_type': 'seo_hashtag',
+                            'hashtag': hashtag,
+                            'performance_score': 0.8,  # High performance indicator
+                            'seo_optimized': True
+                        })
+            
+            return base_patterns
+            
+        except Exception as e:
+            logger.warning(f"Failed to get SEO enhanced patterns: {e}")
+            return []
+    
+    async def _store_seo_optimization_results(self, founder_id: str, draft: ContentDraft, 
+                                            draft_id: str) -> None:
+        """Store SEO optimization results for analytics"""
+        
+        try:
+            if not draft.generation_metadata.get('seo_optimized'):
+                return
+            
+            # Prepare SEO optimization data
+            optimization_data = {
+                'content_draft_id': draft_id,
+                'optimization_timestamp': datetime.utcnow().isoformat(),
+                'seo_quality_score': draft.generation_metadata.get('seo_quality_score', 0.0),
+                'keywords_used': draft.generation_metadata.get('seo_keywords_used', []),
+                'hashtags_suggested': draft.generation_metadata.get('seo_hashtags_suggested', []),
+                'content_type': draft.content_type.value,
+                'optimization_method': 'integrated_generation',
+                'overall_quality_score': draft.quality_score.overall_score if draft.quality_score else 0.0,
+                'trend_id': draft.trend_id,
+                'content_length': len(draft.generated_text)
+            }
+            
+            # Store using DataFlowManager
+            success = self.data_flow_manager.store_seo_optimization_result(founder_id, optimization_data)
+            
+            if success:
+                logger.info(f"Stored SEO optimization results for draft {draft_id}")
+            else:
+                logger.warning(f"Failed to store SEO optimization results for draft {draft_id}")
+                
+        except Exception as e:
+            logger.error(f"Error storing SEO optimization results: {e}")
     
     def _build_brand_voice(self, founder_context: Dict[str, Any], 
                           product_info: Dict[str, Any]) -> BrandVoice:
         """Build brand voice configuration from context"""
         
-        # Get settings from founder context
         settings = founder_context.get('founder_settings', {})
         content_prefs = settings.get('content_preferences', {})
         
@@ -215,101 +361,168 @@ class ContentGenerationService:
             formality_level=content_prefs.get('formality_level', 0.5)
         )
     
-    def get_pending_content_for_review(self, founder_id: str) -> List[Dict[str, Any]]:
-        """
-        Get content pending review for founder (supports DFD 3 step 9)
-        """
-        return self.data_flow_manager.get_pending_content_for_review(founder_id)
-    
-    async def regenerate_content_with_feedback(self, draft_id: str, founder_id: str,feedback: str) -> Optional[str]:
-       """Regenerate content based on user feedback"""
-       
-       try:
-           # Get original draft from database
-           original_draft_data = self.data_flow_manager.content_repo.get_by_id(draft_id)
-           if not original_draft_data or original_draft_data.founder_id != founder_id:
-               logger.error(f"Draft {draft_id} not found or access denied")
-               return None
-           
-           # Convert database model to service model
-           original_draft = self.db_adapter.from_database_format(original_draft_data)
-           
-           # Build generation context
-           request = ContentGenerationRequest(
-               founder_id=founder_id,
-               content_type=original_draft.content_type,
-               trend_id=original_draft.trend_id,
-               source_tweet_id=original_draft.source_tweet_id
-           )
-           
-           generation_context = await self._build_generation_context(founder_id, request)
-           if not generation_context:
-               return None
-           
-           # Regenerate with feedback
-           new_draft = await self.content_generator.regenerate_content(
-               original_draft, generation_context, feedback
-           )
-           
-           if not new_draft:
-               return None
-           
-           # Store new draft
-           draft_data = self.db_adapter.to_database_format(new_draft)
-           return self.data_flow_manager.store_generated_content_draft(draft_data)
-           
-       except Exception as e:
-           logger.error(f"Content regeneration failed: {e}")
-           return None
-   
-    def approve_content_for_publishing(self, draft_id: str, founder_id: str, 
-                                     edited_text: str = None) -> bool:
-        """Approve content for publishing"""
+    async def regenerate_content_with_seo_feedback(self, draft_id: str, founder_id: str,
+                                                  feedback: str, seo_improvements: Dict[str, Any] = None) -> Optional[str]:
+        """Regenerate content with both regular and SEO feedback"""
+        
         try:
-            # get draft
-            draft = self.db_adapter.get_content_draft(draft_id)
-            if not draft:
-                logger.warning(f"Draft {draft_id} not found")
-                return False
+            # Get original draft from database
+            original_draft_data = self.data_flow_manager.content_repo.get_by_id(draft_id)
+            if not original_draft_data or original_draft_data.founder_id != founder_id:
+                logger.error(f"Draft {draft_id} not found or access denied")
+                return None
             
-            # Validate permission
-            if draft.founder_id != founder_id:
-                logger.warning(f"Founder {founder_id} not authorized for draft {draft_id}")
-                return False
+            # Convert database model to service model
+            original_draft = self.db_adapter.from_database_format(original_draft_data)
             
-            # update draft status
-            update_data = {
-                'status': 'approved',
-                'approved_at': datetime.utcnow()
-            }
+            # Build generation context
+            request = ContentGenerationRequest(
+                founder_id=founder_id,
+                content_type=original_draft.content_type,
+                trend_id=original_draft.trend_id,
+                source_tweet_id=original_draft.source_tweet_id
+            )
             
-            # if edited text is provided, update content
-            if edited_text:
-                update_data['content'] = edited_text
+            generation_context = await self._build_enhanced_generation_context(founder_id, request)
+            if not generation_context:
+                return None
             
-            # update database
-            success = self.db_adapter.update_content_draft(draft_id, update_data)
+            # Apply SEO improvements if provided
+            if seo_improvements:
+                generation_context = self._apply_seo_improvements_to_context(
+                    generation_context, seo_improvements
+                )
             
-            if success:
-                logger.info(f"Content draft {draft_id} approved for publishing")
-                
-                # optional: trigger publishing workflow
-                self._trigger_publishing_workflow(draft_id)
-                
-            return success
+            # Regenerate with enhanced feedback
+            enhanced_feedback = feedback
+            if seo_improvements:
+                seo_feedback = self._create_seo_feedback_string(seo_improvements)
+                enhanced_feedback = f"{feedback}\n\nSEO Improvements: {seo_feedback}"
+            
+            # Use the enhanced generator's regeneration method
+            new_draft = await self.content_generator.regenerate_content(
+                original_draft, generation_context, enhanced_feedback
+            )
+            
+            if not new_draft:
+                return None
+            
+            # Store new draft with regeneration metadata
+            new_draft.generation_metadata.update({
+                "regeneration_feedback": feedback,
+                "seo_improvements_applied": seo_improvements or {},
+                "original_draft_id": original_draft.id,
+                "regeneration_timestamp": datetime.utcnow().isoformat()
+            })
+            
+            # Store the new draft
+            draft_data = self.db_adapter.to_database_format(new_draft)
+            new_draft_id = self.data_flow_manager.store_generated_content_draft(draft_data)
+            
+            # Store SEO optimization results
+            if new_draft_id:
+                await self._store_seo_optimization_results(founder_id, new_draft, new_draft_id)
+            
+            return new_draft_id
             
         except Exception as e:
-            logger.error(f"Failed to approve content {draft_id}: {e}")
-            return False
+            logger.error(f"Content regeneration with SEO feedback failed: {e}")
+            return None
     
-    def reject_content(self, draft_id: str, founder_id: str) -> bool:
-        """Reject content draft"""
-        return self.data_flow_manager.process_content_review_decision(
-            draft_id, founder_id, 'rejected'
-        )
+    def _apply_seo_improvements_to_context(self, context: ContentGenerationContext,
+                                         seo_improvements: Dict[str, Any]) -> ContentGenerationContext:
+        """Apply SEO improvements to generation context"""
+        
+        enhanced_context = context.model_copy()
+        
+        # Update content preferences with SEO improvements
+        enhanced_preferences = enhanced_context.content_preferences.copy()
+        
+        if 'additional_keywords' in seo_improvements:
+            enhanced_preferences['additional_seo_keywords'] = seo_improvements['additional_keywords']
+        
+        if 'additional_hashtags' in seo_improvements:
+            enhanced_preferences['additional_seo_hashtags'] = seo_improvements['additional_hashtags']
+        
+        if 'target_length' in seo_improvements:
+            enhanced_preferences['target_length'] = seo_improvements['target_length']
+        
+        if 'optimization_focus' in seo_improvements:
+            enhanced_preferences['seo_optimization_focus'] = seo_improvements['optimization_focus']
+        
+        enhanced_context.content_preferences = enhanced_preferences
+        
+        return enhanced_context
     
-    def get_content_generation_statistics(self, founder_id: str, 
-                                        days: int = 30) -> Dict[str, Any]:
+    def _create_seo_feedback_string(self, seo_improvements: Dict[str, Any]) -> str:
+        """Create SEO feedback string from improvements dictionary"""
+        
+        feedback_parts = []
+        
+        if 'additional_keywords' in seo_improvements:
+            keywords = ', '.join(seo_improvements['additional_keywords'])
+            feedback_parts.append(f"Include these keywords: {keywords}")
+        
+        if 'additional_hashtags' in seo_improvements:
+            hashtags = ', '.join(f"#{tag}" for tag in seo_improvements['additional_hashtags'])
+            feedback_parts.append(f"Add these hashtags: {hashtags}")
+        
+        if 'target_length' in seo_improvements:
+            target_length = seo_improvements['target_length']
+            feedback_parts.append(f"Target length: {target_length} characters")
+        
+        if 'optimization_focus' in seo_improvements:
+            focus = seo_improvements['optimization_focus']
+            feedback_parts.append(f"Focus on: {focus}")
+        
+        return ". ".join(feedback_parts)
+    
+    def get_seo_content_analytics(self, founder_id: str, days: int = 30) -> Dict[str, Any]:
+        """Get SEO-enhanced content analytics"""
+        
+        try:
+            # Get base content statistics
+            base_stats = self.get_content_generation_statistics(founder_id, days)
+            
+            # Get SEO performance data
+            seo_performance = self.data_flow_manager.get_seo_performance_history(founder_id, days)
+            
+            # Combine analytics
+            if seo_performance:
+                # Calculate SEO metrics
+                avg_seo_score = sum(p.get('seo_quality_score', 0) for p in seo_performance) / len(seo_performance)
+                seo_optimized_count = sum(1 for p in seo_performance if p.get('seo_quality_score', 0) > 0.7)
+                
+                # Most used keywords and hashtags
+                all_keywords = []
+                all_hashtags = []
+                
+                for perf in seo_performance:
+                    all_keywords.extend(perf.get('keywords_used', []))
+                    all_hashtags.extend(perf.get('hashtags_suggested', []))
+                
+                from collections import Counter
+                top_keywords = [kw for kw, count in Counter(all_keywords).most_common(10)]
+                top_hashtags = [ht for ht, count in Counter(all_hashtags).most_common(10)]
+                
+                base_stats.update({
+                    'seo_metrics': {
+                        'avg_seo_quality_score': round(avg_seo_score, 3),
+                        'seo_optimized_content_count': seo_optimized_count,
+                        'seo_optimization_rate': round(seo_optimized_count / len(seo_performance), 3),
+                        'top_performing_keywords': top_keywords,
+                        'most_used_hashtags': top_hashtags,
+                        'total_seo_optimizations': len(seo_performance)
+                    }
+                })
+            
+            return base_stats
+            
+        except Exception as e:
+            logger.error(f"Failed to get SEO content analytics: {e}")
+            return {}
+    
+    def get_content_generation_statistics(self, founder_id: str, days: int = 30) -> Dict[str, Any]:
         """Get content generation statistics for a founder"""
         
         try:
@@ -318,13 +531,11 @@ class ContentGenerationService:
             since_date = datetime.now(UTC) - timedelta(days=days)
             
             recent_drafts = self.data_flow_manager.db_session.query(
-                self.data_flow_manager.db_session.query(
-                    self.data_flow_manager.content_repo.model_class
-                ).filter(
-                    self.data_flow_manager.content_repo.model_class.founder_id == founder_id,
-                    self.data_flow_manager.content_repo.model_class.created_at >= since_date
-                ).all()
-            )
+                self.data_flow_manager.content_repo.model_class
+            ).filter(
+                self.data_flow_manager.content_repo.model_class.founder_id == founder_id,
+                self.data_flow_manager.content_repo.model_class.created_at >= since_date
+            ).all()
             
             if not recent_drafts:
                 return {
@@ -369,218 +580,3 @@ class ContentGenerationService:
         except Exception as e:
             logger.error(f"Failed to get content generation statistics: {e}")
             return {}
-    
-    async def bulk_generate_content(self, founder_id: str, 
-                                    content_requests: List[ContentGenerationRequest]) -> Dict[str, List[str]]:
-        """Generate multiple content pieces efficiently"""
-        
-        results = {}
-        
-        # Group requests by type for efficient processing
-        requests_by_type = {}
-        for request in content_requests:
-            content_type = request.content_type
-            if content_type not in requests_by_type:
-                requests_by_type[content_type] = []
-            requests_by_type[content_type].append(request)
-        
-        # Process each content type group
-        for content_type, requests in requests_by_type.items():
-            try:
-                # Generate content for all requests of this type
-                tasks = [
-                    self.generate_content_for_founder(founder_id, request)
-                    for request in requests
-                ]
-                
-                batch_results = await asyncio.gather(*tasks, return_exceptions=True)
-                
-                # Collect successful results
-                type_draft_ids = []
-                for result in batch_results:
-                    if isinstance(result, list):
-                        type_draft_ids.extend(result)
-                    elif isinstance(result, Exception):
-                        logger.error(f"Batch generation error: {result}")
-                
-                results[content_type.value] = type_draft_ids
-                
-            except Exception as e:
-                logger.error(f"Bulk generation failed for {content_type}: {e}")
-                results[content_type.value] = []
-        
-        return results
-    
-    def schedule_automated_content_generation(self, founder_id: str, 
-                                            schedule_config: Dict[str, Any]) -> bool:
-        """
-        Schedule automated content generation (integration point for future scheduler)
-        """
-        try:
-            # This would integrate with a task scheduler (Celery, etc.)
-            logger.info(f"Scheduling automated content generation for founder {founder_id}")
-            
-            # Store schedule configuration in database
-            automation_rule_data = {
-                'rule_name': f'Automated Content Generation - {founder_id}',
-                'trigger_conditions': {
-                    'schedule': schedule_config.get('schedule', 'daily'),
-                    'content_types': schedule_config.get('content_types', ['tweet']),
-                    'min_trend_relevance': schedule_config.get('min_trend_relevance', 0.5)
-                },
-                'action_to_take': {
-                    'action': 'generate_content',
-                    'quantity': schedule_config.get('quantity_per_trigger', 2),
-                    'auto_approve_threshold': schedule_config.get('auto_approve_threshold', 0.8)
-                }
-            }
-            
-            rule_id = self.data_flow_manager.create_automation_rule(founder_id, automation_rule_data)
-            return rule_id is not None
-            
-        except Exception as e:
-            logger.error(f"Failed to schedule automated content generation: {e}")
-            return False
-    
-    def get_content_performance_insights(self, founder_id: str) -> Dict[str, Any]:
-        """Get insights on content performance to improve future generation"""
-        
-        try:
-            # Get published content with analytics
-            published_content = self.data_flow_manager.db_session.query(
-                self.data_flow_manager.content_repo.model_class
-            ).filter(
-                self.data_flow_manager.content_repo.model_class.founder_id == founder_id,
-                self.data_flow_manager.content_repo.model_class.status == 'posted',
-                self.data_flow_manager.content_repo.model_class.posted_tweet_id.isnot(None)
-            ).all()
-            
-            if not published_content:
-                return {'message': 'No published content with analytics available yet'}
-            
-            # Analyze performance patterns
-            performance_insights = {
-                'best_performing_content_types': {},
-                'optimal_content_length': {},
-                'top_performing_trends': [],
-                'engagement_patterns': {},
-                'recommendations': []
-            }
-            
-            # Group by content type and analyze
-            type_performance = {}
-            for content in published_content:
-                content_type = content.content_type
-                if content_type not in type_performance:
-                    type_performance[content_type] = []
-                
-                # Get analytics data
-                if hasattr(content, 'post_analytics') and content.post_analytics:
-                    engagement_rate = content.post_analytics.engagement_rate or 0
-                    type_performance[content_type].append({
-                        'engagement_rate': engagement_rate,
-                        'content_length': len(content.final_text),
-                        'trend_topic': content.analyzed_trend.topic_name if content.analyzed_trend else None
-                    })
-            
-            # Calculate averages and insights
-            for content_type, performances in type_performance.items():
-                if performances:
-                    avg_engagement = sum(p['engagement_rate'] for p in performances) / len(performances)
-                    performance_insights['best_performing_content_types'][content_type] = {
-                        'avg_engagement_rate': round(avg_engagement, 3),
-                        'total_posts': len(performances)
-                    }
-                    
-                    # Optimal length analysis
-                    lengths_and_engagement = [(p['content_length'], p['engagement_rate']) for p in performances]
-                    if lengths_and_engagement:
-                        # Find length range with best engagement
-                        sorted_by_engagement = sorted(lengths_and_engagement, key=lambda x: x[1], reverse=True)
-                        top_performers = sorted_by_engagement[:len(sorted_by_engagement)//3]  # Top third
-                        avg_length = sum(p[0] for p in top_performers) / len(top_performers)
-                        performance_insights['optimal_content_length'][content_type] = int(avg_length)
-            
-            # Generate recommendations
-            recommendations = []
-            
-            # Content type recommendations
-            if performance_insights['best_performing_content_types']:
-                best_type = max(
-                    performance_insights['best_performing_content_types'].items(),
-                    key=lambda x: x[1]['avg_engagement_rate']
-                )
-                recommendations.append(f"Focus more on {best_type[0]} content (avg engagement: {best_type[1]['avg_engagement_rate']:.1%})")
-            
-            # Length recommendations
-            for content_type, optimal_length in performance_insights['optimal_content_length'].items():
-                recommendations.append(f"Optimal {content_type} length: around {optimal_length} characters")
-            
-            performance_insights['recommendations'] = recommendations
-            
-            return performance_insights
-            
-        except Exception as e:
-            logger.error(f"Failed to get performance insights: {e}")
-            return {'error': 'Failed to analyze content performance'}
-
-class ContentGenerationOrchestrator:
-    """
-    High-level orchestrator for managing multiple content generation services
-    Useful for enterprises with multiple brands or A/B testing different approaches
-    """
-    
-    def __init__(self):
-        self.services = {}  # founder_id -> ContentGenerationService
-        self.default_service = None
-    
-    def register_service(self, founder_id: str, service: ContentGenerationService):
-        """Register content generation service for specific founder"""
-        self.services[founder_id] = service
-    
-    def set_default_service(self, service: ContentGenerationService):
-        """Set default service for founders without specific service"""
-        self.default_service = service
-    
-    def get_service(self, founder_id: str) -> Optional[ContentGenerationService]:
-        """Get content generation service for founder"""
-        return self.services.get(founder_id, self.default_service)
-    
-    async def generate_content_for_founder(self, founder_id: str, 
-                                            request: ContentGenerationRequest) -> List[str]:
-        """Generate content using appropriate service"""
-        service = self.get_service(founder_id)
-        if not service:
-            raise ValueError(f"No content generation service available for founder {founder_id}")
-        
-        return await service.generate_content_for_founder(founder_id, request)
-    
-    async def generate_content_for_multiple_founders(self, 
-                                                    requests: List[Tuple[str, ContentGenerationRequest]]) -> Dict[str, List[str]]:
-        """Generate content for multiple founders concurrently"""
-        
-        tasks = []
-        founder_ids = []
-        
-        for founder_id, request in requests:
-            service = self.get_service(founder_id)
-            if service:
-                tasks.append(service.generate_content_for_founder(founder_id, request))
-                founder_ids.append(founder_id)
-        
-        if not tasks:
-            return {}
-        
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # Combine results
-        founder_results = {}
-        for i, result in enumerate(results):
-            founder_id = founder_ids[i]
-            if isinstance(result, list):
-                founder_results[founder_id] = result
-            else:
-                logger.error(f"Content generation failed for founder {founder_id}: {result}")
-                founder_results[founder_id] = []
-        
-        return founder_results

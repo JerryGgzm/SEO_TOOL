@@ -1,6 +1,7 @@
 """Main content generation orchestrator"""
+"""Enhanced content generation with full SEO integration"""
 import asyncio
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Dict
 import logging
 from datetime import datetime
 
@@ -13,98 +14,461 @@ from .prompts import PromptEngine
 from .content_types import ContentTypeFactory
 from .quality_checker import ContentQualityChecker
 
+# Import SEO components
+from modules.seo.optimizer import SEOOptimizer
+from modules.seo.models import (
+    SEOOptimizationRequest, SEOAnalysisContext, SEOContentType,
+    SEOOptimizationLevel, HashtagStrategy
+)
+
 logger = logging.getLogger(__name__)
 
 class ContentGenerator:
-    """Main content generation orchestrator"""
+    """Content generator with full SEO integration"""
     
-    def __init__(self, llm_adapter: LLMAdapter, seo_module=None):
+    def __init__(self, llm_adapter: LLMAdapter, seo_optimizer: SEOOptimizer = None):
         self.llm_adapter = llm_adapter
-        self.seo_module = seo_module  # Will be injected when SEOModule is ready
+        self.seo_optimizer = seo_optimizer  # SEO module integration
         self.prompt_engine = PromptEngine()
         self.quality_checker = ContentQualityChecker()
         self.content_factory = ContentTypeFactory()
+        
+        # Enhanced generation strategies
+        self.generation_strategies = {
+            'seo_optimized': self._generate_seo_optimized_content,
+            'engagement_focused': self._generate_engagement_focused_content,
+            'trend_based': self._generate_trend_based_content,
+            'balanced': self._generate_balanced_content
+        }
     
     async def generate_content(self, request: ContentGenerationRequest, 
                              context: ContentGenerationContext) -> List[ContentDraft]:
         """
-        Main content generation method following DFD 3 steps 4-7
+        Enhanced content generation with SEO optimization
         
         Args:
             request: Content generation request
             context: Generation context with user/product/trend info
             
         Returns:
-            List of generated content drafts
+            List of SEO-optimized content drafts
         """
         try:
-            logger.info(f"Generating {request.content_type} content for founder {request.founder_id}")
+            logger.info(f"Generating {request.content_type} content with SEO optimization")
             
-            # Step 4-5: Get SEO suggestions (DFD 3)
-            seo_suggestions = await self._get_seo_suggestions(context, request.content_type)
+            # Step 1: Get SEO suggestions (enhanced)
+            seo_suggestions = await self._get_enhanced_seo_suggestions(context, request.content_type)
             
-            # Generate prompt based on context
-            prompt = self._create_generation_prompt(request, context, seo_suggestions)
+            # Step 2: Create SEO-enhanced context
+            enhanced_context = self._enhance_context_with_seo(context, seo_suggestions)
             
-            # Step 6-7: Generate content using LLM (DFD 3)
+            # Step 3: Generate content using appropriate strategy
+            strategy = request.generation_strategy if hasattr(request, 'generation_strategy') else 'balanced'
+            generation_method = self.generation_strategies.get(strategy, self._generate_balanced_content)
+            
+            # Step 4: Generate multiple content variations
             if request.quantity == 1:
-                llm_response = await self.llm_adapter.generate_content(prompt)
-                llm_responses = [llm_response]
+                drafts = await generation_method(request, enhanced_context, seo_suggestions)
             else:
-                llm_responses = await self.llm_adapter.generate_multiple(
-                    prompt, request.quantity
-                )
+                all_drafts = []
+                for i in range(request.quantity):
+                    batch_drafts = await generation_method(request, enhanced_context, seo_suggestions)
+                    all_drafts.extend(batch_drafts)
+                drafts = all_drafts[:request.quantity]
             
-            # Process each response into content drafts
-            drafts = []
-            for i, response in enumerate(llm_responses):
-                try:
-                    draft = await self._process_llm_response(
-                        response, request, context, seo_suggestions, i
-                    )
-                    if draft:
-                        drafts.append(draft)
-                except Exception as e:
-                    logger.error(f"Failed to process LLM response {i}: {e}")
-                    continue
-            
-            # Filter by quality threshold
-            quality_drafts = []
+            # Step 5: Apply SEO optimization to each draft
+            optimized_drafts = []
             for draft in drafts:
+                optimized_draft = await self._apply_seo_optimization(draft, enhanced_context)
+                if optimized_draft:
+                    optimized_drafts.append(optimized_draft)
+            
+            # Step 6: Filter by quality threshold
+            quality_drafts = []
+            for draft in optimized_drafts:
                 if (draft.quality_score and 
                     draft.quality_score.overall_score >= request.quality_threshold):
                     quality_drafts.append(draft)
             
-            logger.info(f"Generated {len(quality_drafts)}/{len(drafts)} quality drafts")
+            logger.info(f"Generated {len(quality_drafts)}/{len(drafts)} quality SEO-optimized drafts")
             return quality_drafts
             
         except Exception as e:
-            logger.error(f"Content generation failed: {e}")
+            logger.error(f"Enhanced content generation failed: {e}")
             return []
     
-    async def generate_single_content(self, request: ContentGenerationRequest,
-                                    context: ContentGenerationContext) -> Optional[ContentDraft]:
-        """Generate a single piece of content"""
-        drafts = await self.generate_content(request, context)
-        return drafts[0] if drafts else None
+    async def _get_enhanced_seo_suggestions(self, context: ContentGenerationContext, 
+                                          content_type: ContentType) -> SEOSuggestions:
+        """Get enhanced SEO suggestions using SEO module"""
+        
+        if not self.seo_optimizer:
+            return self._generate_fallback_seo_suggestions(context, content_type)
+        
+        try:
+            # Build trend info for SEO module
+            trend_info = context.trend_info or {}
+            
+            # Build product info for SEO module
+            product_info = context.product_info or {}
+            
+            # Convert content type to SEO content type
+            seo_content_type = self._convert_to_seo_content_type(content_type)
+            
+            # Get SEO suggestions from SEO module
+            seo_suggestions = await self.seo_optimizer.get_content_suggestions(
+                trend_info=trend_info,
+                product_info=product_info,
+                content_type=seo_content_type
+            )
+            
+            # Convert SEO suggestions to content generation format
+            return SEOSuggestions(
+                hashtags=seo_suggestions.recommended_hashtags,
+                keywords=seo_suggestions.primary_keywords + seo_suggestions.secondary_keywords,
+                mentions=getattr(seo_suggestions, 'recommended_mentions', []),
+                trending_tags=seo_suggestions.trending_terms,
+                optimal_length=seo_suggestions.optimal_length
+            )
+            
+        except Exception as e:
+            logger.warning(f"SEO module failed, using fallback: {e}")
+            return self._generate_fallback_seo_suggestions(context, content_type)
     
-    async def _get_seo_suggestions(self, context: ContentGenerationContext, 
-                                 content_type: ContentType) -> SEOSuggestions:
-        """Get SEO suggestions from SEO module (DFD 3 steps 4-5)"""
+    def _enhance_context_with_seo(self, context: ContentGenerationContext,
+                                 seo_suggestions: SEOSuggestions) -> ContentGenerationContext:
+        """Enhance generation context with SEO data"""
         
-        # If SEO module is available, use it
-        if self.seo_module:
-            try:
-                return await self.seo_module.get_content_suggestions(
-                    trend_info=context.trend_info,
-                    product_info=context.product_info,
-                    content_type=content_type
-                )
-            except Exception as e:
-                logger.warning(f"SEO module failed, using fallback: {e}")
+        enhanced_context = context.model_copy()
         
-        # Fallback SEO suggestions based on context
-        return self._generate_fallback_seo_suggestions(context, content_type)
+        # Add SEO suggestions to content preferences
+        enhanced_context.content_preferences = {
+            **enhanced_context.content_preferences,
+            "seo_hashtags": seo_suggestions.hashtags,
+            "seo_keywords": seo_suggestions.keywords,
+            "trending_tags": seo_suggestions.trending_tags,
+            "optimal_length": seo_suggestions.optimal_length,
+            "seo_enhanced": True
+        }
+        
+        return enhanced_context
+    
+    async def _generate_seo_optimized_content(self, request: ContentGenerationRequest,
+                                            context: ContentGenerationContext,
+                                            seo_suggestions: SEOSuggestions) -> List[ContentDraft]:
+        """Generate content with primary focus on SEO optimization"""
+        
+        # Create SEO-focused prompt
+        seo_prompt = self._create_seo_focused_prompt(request, context, seo_suggestions)
+        
+        # Generate content
+        llm_response = await self.llm_adapter.generate_content(seo_prompt, temperature=0.7)
+        
+        # Process response
+        draft = await self._process_llm_response(
+            llm_response, request, context, seo_suggestions, 0
+        )
+        
+        return [draft] if draft else []
+    
+    async def _generate_engagement_focused_content(self, request: ContentGenerationRequest,
+                                                 context: ContentGenerationContext,
+                                                 seo_suggestions: SEOSuggestions) -> List[ContentDraft]:
+        """Generate content with primary focus on engagement"""
+        
+        # Create engagement-focused prompt
+        engagement_prompt = self._create_engagement_focused_prompt(request, context, seo_suggestions)
+        
+        # Generate content
+        llm_response = await self.llm_adapter.generate_content(engagement_prompt, temperature=0.8)
+        
+        # Process response
+        draft = await self._process_llm_response(
+            llm_response, request, context, seo_suggestions, 0
+        )
+        
+        return [draft] if draft else []
+    
+    async def _generate_trend_based_content(self, request: ContentGenerationRequest,
+                                          context: ContentGenerationContext,
+                                          seo_suggestions: SEOSuggestions) -> List[ContentDraft]:
+        """Generate content with primary focus on trending topics"""
+        
+        if not context.trend_info:
+            # Fallback to balanced approach if no trend info
+            return await self._generate_balanced_content(request, context, seo_suggestions)
+        
+        # Create trend-focused prompt
+        trend_prompt = self._create_trend_focused_prompt(request, context, seo_suggestions)
+        
+        # Generate content
+        llm_response = await self.llm_adapter.generate_content(trend_prompt, temperature=0.8)
+        
+        # Process response
+        draft = await self._process_llm_response(
+            llm_response, request, context, seo_suggestions, 0
+        )
+        
+        return [draft] if draft else []
+    
+    async def _generate_balanced_content(self, request: ContentGenerationRequest,
+                                       context: ContentGenerationContext,
+                                       seo_suggestions: SEOSuggestions) -> List[ContentDraft]:
+        """Generate content with balanced approach (SEO + engagement + trends)"""
+        
+        # Create balanced prompt
+        balanced_prompt = self._create_balanced_prompt(request, context, seo_suggestions)
+        
+        # Generate content
+        llm_response = await self.llm_adapter.generate_content(balanced_prompt, temperature=0.75)
+        
+        # Process response
+        draft = await self._process_llm_response(
+            llm_response, request, context, seo_suggestions, 0
+        )
+        
+        return [draft] if draft else []
+    
+    def _create_seo_focused_prompt(self, request: ContentGenerationRequest,
+                                 context: ContentGenerationContext,
+                                 seo_suggestions: SEOSuggestions) -> str:
+        """Create SEO-focused generation prompt"""
+        
+        base_prompt = self.prompt_engine.generate_prompt(request.content_type, context)
+        
+        # Add SEO-specific instructions
+        seo_instructions = f"""
+        
+SEO OPTIMIZATION REQUIREMENTS:
+- Primary Keywords: {', '.join(seo_suggestions.keywords[:3])}
+- Target Hashtags: {', '.join(f'#{tag}' for tag in seo_suggestions.hashtags[:5])}
+- Optimal Length: {seo_suggestions.optimal_length or 'platform optimal'} characters
+- Include trending terms: {', '.join(seo_suggestions.trending_tags[:3])}
+
+IMPORTANT: Naturally integrate these SEO elements while maintaining readability and authenticity.
+"""
+        
+        return base_prompt + seo_instructions
+    
+    def _create_engagement_focused_prompt(self, request: ContentGenerationRequest,
+                                        context: ContentGenerationContext,
+                                        seo_suggestions: SEOSuggestions) -> str:
+        """Create engagement-focused generation prompt"""
+        
+        base_prompt = self.prompt_engine.generate_prompt(request.content_type, context)
+        
+        # Add engagement-specific instructions
+        engagement_instructions = f"""
+        
+ENGAGEMENT OPTIMIZATION REQUIREMENTS:
+- Include a compelling question or call-to-action
+- Use emotional triggers and personal language
+- Add numbers or statistics for attention
+- Include relevant hashtags: {', '.join(f'#{tag}' for tag in seo_suggestions.hashtags[:3])}
+- Target length: {seo_suggestions.optimal_length or 'platform optimal'} characters
+
+FOCUS: Maximum engagement while incorporating: {', '.join(seo_suggestions.keywords[:2])}
+"""
+        
+        return base_prompt + engagement_instructions
+    
+    def _create_trend_focused_prompt(self, request: ContentGenerationRequest,
+                                   context: ContentGenerationContext,
+                                   seo_suggestions: SEOSuggestions) -> str:
+        """Create trend-focused generation prompt"""
+        
+        base_prompt = self.prompt_engine.generate_prompt(request.content_type, context)
+        
+        # Extract trend information
+        trend_info = context.trend_info or {}
+        trend_name = trend_info.get('topic_name', 'current trends')
+        pain_points = trend_info.get('pain_points', [])
+        
+        # Add trend-specific instructions
+        trend_instructions = f"""
+        
+TREND OPTIMIZATION REQUIREMENTS:
+- Focus on trending topic: {trend_name}
+- Address key pain points: {', '.join(pain_points[:2])}
+- Include trending hashtags: {', '.join(f'#{tag}' for tag in seo_suggestions.trending_tags[:3])}
+- Incorporate keywords: {', '.join(seo_suggestions.keywords[:3])}
+
+GOAL: Capitalize on trend momentum while maintaining brand relevance.
+"""
+        
+        return base_prompt + trend_instructions
+    
+    def _create_balanced_prompt(self, request: ContentGenerationRequest,
+                              context: ContentGenerationContext,
+                              seo_suggestions: SEOSuggestions) -> str:
+        """Create balanced generation prompt"""
+        
+        base_prompt = self.prompt_engine.generate_prompt(request.content_type, context)
+        
+        # Add balanced instructions
+        balanced_instructions = f"""
+        
+BALANCED OPTIMIZATION REQUIREMENTS:
+- SEO Keywords (natural integration): {', '.join(seo_suggestions.keywords[:2])}
+- Engagement elements: question or compelling hook
+- Relevant hashtags: {', '.join(f'#{tag}' for tag in seo_suggestions.hashtags[:3])}
+- Target length: {seo_suggestions.optimal_length or 'platform optimal'} characters
+
+BALANCE: Equal focus on SEO discoverability, audience engagement, and brand authenticity.
+"""
+        
+        return base_prompt + balanced_instructions
+    
+    async def _apply_seo_optimization(self, draft: ContentDraft,
+                                    context: ContentGenerationContext) -> Optional[ContentDraft]:
+        """Apply additional SEO optimization to generated draft"""
+        
+        if not self.seo_optimizer:
+            return draft
+        
+        try:
+            # Convert content type
+            seo_content_type = self._convert_to_seo_content_type(draft.content_type)
+            
+            # Apply SEO optimization
+            optimized_text = self.seo_optimizer.optimize_content_simple(
+                text=draft.generated_text,
+                content_type=seo_content_type,
+                context={
+                    'seo_keywords': context.content_preferences.get('seo_keywords', []),
+                    'target_audience': context.target_audience
+                }
+            )
+            
+            # Update draft with optimized content
+            if optimized_text != draft.generated_text:
+                draft.generated_text = optimized_text
+                
+                # Update metadata to track SEO optimization
+                draft.generation_metadata["seo_optimized"] = True
+                draft.generation_metadata["seo_optimization_timestamp"] = datetime.utcnow().isoformat()
+            
+            return draft
+            
+        except Exception as e:
+            logger.warning(f"SEO optimization failed for draft: {e}")
+            return draft
+    
+    async def _process_llm_response(self, llm_response, request: ContentGenerationRequest,
+                                  context: ContentGenerationContext, 
+                                  seo_suggestions: SEOSuggestions,
+                                  response_index: int) -> Optional[ContentDraft]:
+        """Enhanced LLM response processing with SEO data"""
+        
+        try:
+            # Create initial draft
+            draft = ContentDraft(
+                founder_id=request.founder_id,
+                content_type=request.content_type,
+                generated_text=llm_response.content,
+                trend_id=request.trend_id,
+                source_tweet_id=request.source_tweet_id,
+                seo_suggestions=seo_suggestions,
+                generation_metadata={
+                    "llm_confidence": llm_response.confidence,
+                    "llm_reasoning": llm_response.reasoning,
+                    "alternatives": llm_response.alternatives,
+                    "response_index": response_index,
+                    "generation_timestamp": datetime.utcnow().isoformat(),
+                    "seo_keywords_used": seo_suggestions.keywords,
+                    "seo_hashtags_suggested": seo_suggestions.hashtags
+                }
+            )
+            
+            # Validate and optimize content
+            is_valid, issues, optimized_text = self.content_factory.validate_and_optimize(
+                draft, context=context.dict(), seo_optimizer=self.seo_optimizer
+            )
+            
+            if not is_valid:
+                logger.warning(f"Content validation failed: {issues}")
+                # Try to fix common issues
+                fixed_text = self._attempt_content_fixes(draft.generated_text, issues)
+                if fixed_text != draft.generated_text:
+                    draft.generated_text = fixed_text
+                    is_valid, issues, optimized_text = self.content_factory.validate_and_optimize(draft)
+            
+            if is_valid:
+                draft.generated_text = optimized_text
+            
+            # Assess content quality (now includes SEO factors)
+            quality_score = await self.quality_checker.assess_quality(draft, context)
+            draft.quality_score = quality_score
+            
+            # Add SEO quality metrics
+            if self.seo_optimizer:
+                seo_score = self._calculate_seo_quality_score(draft, seo_suggestions)
+                draft.generation_metadata["seo_quality_score"] = seo_score
+            
+            return draft
+            
+        except Exception as e:
+            logger.error(f"Failed to process LLM response: {e}")
+            return None
+    
+    def _calculate_seo_quality_score(self, draft: ContentDraft, 
+                                   seo_suggestions: SEOSuggestions) -> float:
+        """Calculate SEO quality score for the draft"""
+        
+        score = 0.0
+        content_lower = draft.generated_text.lower()
+        
+        # Keyword integration score (30%)
+        keywords_found = 0
+        for keyword in seo_suggestions.keywords[:5]:
+            if keyword.lower() in content_lower:
+                keywords_found += 1
+        
+        if seo_suggestions.keywords:
+            keyword_score = keywords_found / min(len(seo_suggestions.keywords), 5)
+            score += keyword_score * 0.3
+        
+        # Hashtag utilization score (25%)
+        hashtags_in_content = len([tag for tag in seo_suggestions.hashtags if f'#{tag}' in draft.generated_text])
+        if seo_suggestions.hashtags:
+            hashtag_score = hashtags_in_content / min(len(seo_suggestions.hashtags), 5)
+            score += hashtag_score * 0.25
+        
+        # Length optimization score (20%)
+        if seo_suggestions.optimal_length:
+            length_diff = abs(len(draft.generated_text) - seo_suggestions.optimal_length)
+            length_score = max(0, 1 - (length_diff / seo_suggestions.optimal_length))
+            score += length_score * 0.2
+        else:
+            score += 0.2  # Assume optimal if no target length
+        
+        # Trending terms usage (15%)
+        trending_found = 0
+        for term in seo_suggestions.trending_tags:
+            if term.lower() in content_lower:
+                trending_found += 1
+        
+        if seo_suggestions.trending_tags:
+            trending_score = trending_found / len(seo_suggestions.trending_tags)
+            score += trending_score * 0.15
+        
+        # Structure and readability (10%)
+        structure_score = 0.8  # Base score for well-formed content
+        if '?' in draft.generated_text or '!' in draft.generated_text:
+            structure_score += 0.2
+        
+        score += min(1.0, structure_score) * 0.1
+        
+        return min(1.0, score)
+    
+    def _convert_to_seo_content_type(self, content_type: ContentType) -> SEOContentType:
+        """Convert ContentType to SEOContentType"""
+        mapping = {
+            ContentType.TWEET: SEOContentType.TWEET,
+            ContentType.REPLY: SEOContentType.REPLY,
+            ContentType.THREAD: SEOContentType.THREAD,
+            ContentType.QUOTE_TWEET: SEOContentType.QUOTE_TWEET
+        }
+        return mapping.get(content_type, SEOContentType.TWEET)
     
     def _generate_fallback_seo_suggestions(self, context: ContentGenerationContext,
                                          content_type: ContentType) -> SEOSuggestions:
@@ -122,27 +486,24 @@ class ContentGenerator:
             # Add pain points as keywords
             pain_points = context.trend_info.get("pain_points", [])
             for point in pain_points[:3]:
-                # Extract key terms from pain points
                 words = point.lower().split()
                 keywords.extend([w for w in words if len(w) > 4])
         
         # Extract from product info
         product_info = context.product_info
         if product_info:
-            # Add product category hashtags
             category = product_info.get("industry_category", "")
             if category:
                 hashtags.append(category.replace(" ", ""))
             
-            # Add core values as keywords
             core_values = product_info.get("core_values", [])
             keywords.extend(core_values[:2])
         
         # Content type specific suggestions
         if content_type == ContentType.TWEET:
-            hashtags = hashtags[:3]  # Max 3 hashtags for tweets
+            hashtags = hashtags[:3]
         elif content_type == ContentType.REPLY:
-            hashtags = hashtags[:1]  # Max 1 hashtag for replies
+            hashtags = hashtags[:1]
         
         return SEOSuggestions(
             hashtags=list(set(hashtags))[:5],
@@ -150,99 +511,6 @@ class ContentGenerator:
             trending_tags=[],
             mentions=[]
         )
-    
-    def _create_generation_prompt(self, request: ContentGenerationRequest,
-                                context: ContentGenerationContext,
-                                seo_suggestions: SEOSuggestions) -> str:
-        """Create generation prompt based on request and context"""
-        
-        # Add SEO suggestions to context
-        enhanced_context = context.model_copy()
-        enhanced_context.content_preferences = {
-            **enhanced_context.content_preferences,
-            "seo_hashtags": seo_suggestions.hashtags,
-            "seo_keywords": seo_suggestions.keywords
-        }
-        
-        # Handle custom prompts
-        if request.custom_prompt:
-            return self.prompt_engine.create_custom_prompt(
-                request.custom_prompt, enhanced_context
-            )
-        
-        # Handle reply-specific context
-        if request.content_type == ContentType.REPLY and request.source_tweet_id:
-            enhanced_context.content_preferences["original_tweet"] = (
-                request.source_tweet_id  # In real implementation, fetch actual tweet
-            )
-        
-        # Generate prompt using prompt engine
-        prompt = self.prompt_engine.generate_prompt(
-            request.content_type, enhanced_context
-        )
-        
-        # Optimize for LLM provider
-        llm_provider = getattr(self.llm_adapter, 'model_name', 'unknown')
-        if 'gpt' in llm_provider.lower():
-            provider = 'openai'
-        elif 'claude' in llm_provider.lower():
-            provider = 'claude'
-        else:
-            provider = 'local'
-        
-        return self.prompt_engine.optimize_prompt_for_llm(prompt, provider)
-    
-    async def _process_llm_response(self, llm_response, request: ContentGenerationRequest,
-                                  context: ContentGenerationContext, 
-                                  seo_suggestions: SEOSuggestions,
-                                  response_index: int) -> Optional[ContentDraft]:
-        """Process LLM response into content draft"""
-        
-        try:
-            # Create initial draft
-            draft = ContentDraft(
-                founder_id=request.founder_id,
-                content_type=request.content_type,
-                generated_text=llm_response.content,
-                trend_id=request.trend_id,
-                source_tweet_id=request.source_tweet_id,
-                seo_suggestions=seo_suggestions,
-                generation_metadata={
-                    "llm_confidence": llm_response.confidence,
-                    "llm_reasoning": llm_response.reasoning,
-                    "alternatives": llm_response.alternatives,
-                    "response_index": response_index,
-                    "generation_timestamp": datetime.utcnow().isoformat()
-                }
-            )
-            
-            # Validate and optimize content
-            is_valid, issues, optimized_text = self.content_factory.validate_and_optimize(draft)
-            
-            if not is_valid:
-                logger.warning(f"Content validation failed: {issues}")
-                # Try to fix common issues
-                fixed_text = self._attempt_content_fixes(draft.generated_text, issues)
-                if fixed_text != draft.generated_text:
-                    draft.generated_text = fixed_text
-                    is_valid, issues, optimized_text = self.content_factory.validate_and_optimize(draft)
-            
-            if is_valid:
-                draft.generated_text = optimized_text
-            
-            # Assess content quality
-            quality_score = await self.quality_checker.assess_quality(draft, context)
-            draft.quality_score = quality_score
-            
-            # Add quality issues to generation metadata
-            if quality_score.issues:
-                draft.generation_metadata["quality_issues"] = quality_score.issues
-            
-            return draft
-            
-        except Exception as e:
-            logger.error(f"Failed to process LLM response: {e}")
-            return None
     
     def _attempt_content_fixes(self, text: str, issues: List[str]) -> str:
         """Attempt to fix common content issues"""
@@ -252,11 +520,10 @@ class ContentGenerator:
             if "exceeds" in issue and "characters" in issue:
                 # Truncate text intelligently
                 if len(fixed_text) > 280:
-                    # Try to truncate at sentence boundary
                     sentences = fixed_text.split('. ')
                     truncated = ""
                     for sentence in sentences:
-                        if len(truncated + sentence + '. ') <= 275:  # Leave room for ellipsis
+                        if len(truncated + sentence + '. ') <= 275:
                             truncated += sentence + '. '
                         else:
                             break
@@ -264,149 +531,27 @@ class ContentGenerator:
                     if truncated:
                         fixed_text = truncated.rstrip('. ') + "..."
                     else:
-                        # Hard truncate with ellipsis
                         fixed_text = fixed_text[:277] + "..."
             
             elif "Too many hashtags" in issue:
-                # Remove excess hashtags
                 import re
                 hashtags = re.findall(r'#\w+', fixed_text)
                 if len(hashtags) > 5:
-                    # Keep first 3 hashtags
                     for hashtag in hashtags[3:]:
                         fixed_text = fixed_text.replace(hashtag, '', 1)
-            
-            elif "Too many mentions" in issue:
-                # Remove excess mentions
-                import re
-                mentions = re.findall(r'@\w+', fixed_text)
-                if len(mentions) > 3:
-                    # Keep first 2 mentions
-                    for mention in mentions[2:]:
-                        fixed_text = fixed_text.replace(mention, '', 1)
         
         return fixed_text.strip()
-    
-    async def regenerate_content(self, original_draft: ContentDraft, 
-                               context: ContentGenerationContext,
-                               feedback: str = "") -> Optional[ContentDraft]:
-        """Regenerate content based on feedback"""
-        
-        try:
-            # Create modified prompt with feedback
-            base_prompt = self._create_generation_prompt(
-                ContentGenerationRequest(
-                    founder_id=original_draft.founder_id,
-                    content_type=original_draft.content_type,
-                    trend_id=original_draft.trend_id,
-                    source_tweet_id=original_draft.source_tweet_id
-                ),
-                context,
-                original_draft.seo_suggestions
-            )
-            
-            feedback_prompt = f"{base_prompt}\n\nPrevious attempt: {original_draft.generated_text}\n\nFeedback: {feedback}\n\nPlease create an improved version addressing the feedback."
-            
-            # Generate new content
-            llm_response = await self.llm_adapter.generate_content(feedback_prompt)
-            
-            # Process response
-            new_draft = await self._process_llm_response(
-                llm_response,
-                ContentGenerationRequest(
-                    founder_id=original_draft.founder_id,
-                    content_type=original_draft.content_type,
-                    trend_id=original_draft.trend_id,
-                    source_tweet_id=original_draft.source_tweet_id
-                ),
-                context,
-                original_draft.seo_suggestions,
-                0
-            )
-            
-            if new_draft:
-                new_draft.generation_metadata["regeneration_feedback"] = feedback
-                new_draft.generation_metadata["original_draft_id"] = original_draft.id
-            
-            return new_draft
-            
-        except Exception as e:
-            logger.error(f"Content regeneration failed: {e}")
-            return None
-    
-    def get_generation_statistics(self) -> Dict[str, Any]:
-        """Get content generation statistics"""
-        # This would be implemented with actual tracking
-        return {
-            "total_generated": 0,
-            "success_rate": 0.0,
-            "avg_quality_score": 0.0,
-            "popular_content_types": {},
-            "common_issues": []
-        }
 
 class ContentGenerationFactory:
-    """Factory for creating content generators with different LLM providers"""
+    """Enhanced factory for creating content generators with SEO integration"""
     
     @staticmethod
-    def create_generator(llm_provider: str, llm_config: Dict[str, Any], 
-                        seo_module=None) -> ContentGenerator:
-        """Create content generator with specified LLM provider"""
+    def create_enhanced_generator(llm_provider: str, llm_config: Dict[str, Any], 
+                                seo_optimizer: SEOOptimizer = None) -> ContentGenerator:
+        """Create enhanced content generator with SEO integration"""
         
         # Create LLM adapter
         llm_adapter = LLMAdapterFactory.create_adapter(llm_provider, **llm_config)
         
-        # Create and return generator
-        return ContentGenerator(llm_adapter, seo_module)
-    
-    @staticmethod
-    def create_multi_provider_generator(providers_config: List[Dict[str, Any]], 
-                                      seo_module=None) -> 'MultiProviderContentGenerator':
-        """Create generator that can use multiple LLM providers"""
-        
-        generators = {}
-        for config in providers_config:
-            provider = config.pop('provider')
-            generators[provider] = ContentGenerationFactory.create_generator(
-                provider, config, seo_module
-            )
-        
-        return MultiProviderContentGenerator(generators, seo_module)
-
-class MultiProviderContentGenerator:
-    """Content generator that can use multiple LLM providers"""
-    
-    def __init__(self, generators: Dict[str, ContentGenerator], seo_module=None):
-        self.generators = generators
-        self.seo_module = seo_module
-        self.default_provider = list(generators.keys())[0] if generators else None
-    
-    async def generate_content(self, request: ContentGenerationRequest,
-                             context: ContentGenerationContext,
-                             preferred_provider: str = None) -> List[ContentDraft]:
-        """Generate content using specified or default provider"""
-        
-        provider = preferred_provider or self.default_provider
-        generator = self.generators.get(provider)
-        
-        if not generator:
-            raise ValueError(f"Provider {provider} not available")
-        
-        return await generator.generate_content(request, context)
-    
-    async def generate_with_fallback(self, request: ContentGenerationRequest,
-                                   context: ContentGenerationContext) -> List[ContentDraft]:
-        """Generate content with automatic fallback to other providers"""
-        
-        for provider, generator in self.generators.items():
-            try:
-                logger.info(f"Attempting content generation with {provider}")
-                drafts = await generator.generate_content(request, context)
-                if drafts:
-                    return drafts
-            except Exception as e:
-                logger.warning(f"Provider {provider} failed: {e}")
-                continue
-        
-        logger.error("All providers failed to generate content")
-        return []
+        # Create and return enhanced generator
+        return ContentGenerator(llm_adapter, seo_optimizer)

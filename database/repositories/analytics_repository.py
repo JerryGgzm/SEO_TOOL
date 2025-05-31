@@ -14,6 +14,17 @@ class AnalyticsRepository(BaseRepository):
     
     def __init__(self, db_session: Session):
         super().__init__(db_session, PostAnalytic)
+
+    def track_hashtag_performance(self, hashtag: str, metrics: Dict[str, float]) -> bool:
+        """Track individual hashtag performance"""
+        # TODO: Implementation here
+        
+        
+        
+    def get_hashtag_performance_trends(self, founder_id: str, days: int = 30) -> List[Dict]:
+        """Get hashtag performance trends"""
+        # TODO: Implementation here
+        
     
     def create_or_update_analytics(self, posted_tweet_id: str, 
                                  founder_id: str, **metrics) -> Optional[PostAnalytic]:

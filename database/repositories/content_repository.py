@@ -2,7 +2,7 @@ from database.models import GeneratedContentDraft
 from database.repositories.base_repository import BaseRepository
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from sqlalchemy.exc import SQLAlchemyError
 import logging
 
@@ -13,6 +13,21 @@ class ContentRepository(BaseRepository):
     
     def __init__(self, db_session: Session):
         super().__init__(db_session, GeneratedContentDraft)
+
+    def store_seo_metadata(self, draft_id: str, seo_data: Dict[str, Any]) -> bool:
+        """Store SEO optimization metadata"""
+        try:
+            draft = self.get_by_id(draft_id)
+            if draft:
+                if not draft.ai_generation_metadata:
+                    draft.ai_generation_metadata = {}
+                draft.ai_generation_metadata['seo_optimization'] = seo_data
+                self.db_session.commit()
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Failed to store SEO metadata: {e}")
+            return False
     
     def get_pending_review(self, founder_id: str) -> List[GeneratedContentDraft]:
         """Get content pending review"""

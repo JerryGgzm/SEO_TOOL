@@ -8,7 +8,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 Base = declarative_base()
-T = TypeVar('T', bound=Base)
+T = TypeVar('T')
 
 class BaseRepository(ABC):
     """Base repository class with common CRUD operations"""

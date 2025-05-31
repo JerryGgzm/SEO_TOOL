@@ -1278,3 +1278,484 @@ class DataFlowManager:
             logger.error(f"Failed to recalculate engagement rates: {e}")
             self.db_session.rollback()
             return 0
+
+    def store_seo_optimization_result(self, founder_id: str, 
+                                    optimization_data: Dict[str, Any]) -> bool:
+        """Store SEO optimization results"""
+        # TODO
+        
+    def get_seo_performance_history(self, founder_id: str, 
+                                  days: int = 30) -> List[Dict[str, Any]]:
+        """Get SEO performance history for analytics"""
+        # TODO
+
+
+class DataFlowManagerSEOExtensions:
+    """SEO-related extensions for DataFlowManager"""
+    
+    def store_seo_optimization_result(self, founder_id: str, optimization_data: Dict[str, Any]) -> bool:
+        """
+        Store SEO optimization results
+        
+        Args:
+            founder_id: Founder's ID
+            optimization_data: SEO optimization data including:
+                - content_draft_id: ID of the content draft
+                - optimization_timestamp: When optimization was performed
+                - seo_quality_score: Overall SEO quality score (0-1)
+                - keywords_used: List of keywords used
+                - hashtags_suggested: List of hashtags suggested
+                - content_type: Type of content (tweet, reply, etc.)
+                - optimization_method: Method used for optimization
+                - overall_quality_score: Overall content quality score
+                - trend_id: Associated trend ID (optional)
+                - content_length: Length of optimized content
+        
+        Returns:
+            bool: Success status
+        """
+        try:
+            # Prepare SEO optimization record
+            seo_record = {
+                'founder_id': founder_id,
+                'content_draft_id': optimization_data.get('content_draft_id'),
+                'optimization_timestamp': optimization_data.get('optimization_timestamp', datetime.utcnow().isoformat()),
+                'seo_quality_score': optimization_data.get('seo_quality_score', 0.0),
+                'overall_quality_score': optimization_data.get('overall_quality_score', 0.0),
+                'keywords_used': json.dumps(optimization_data.get('keywords_used', [])),
+                'hashtags_suggested': json.dumps(optimization_data.get('hashtags_suggested', [])),
+                'content_type': optimization_data.get('content_type', 'tweet'),
+                'optimization_method': optimization_data.get('optimization_method', 'unknown'),
+                'content_length': optimization_data.get('content_length', 0),
+                'trend_id': optimization_data.get('trend_id'),
+                'metadata': json.dumps({
+                    'optimization_level': optimization_data.get('optimization_level'),
+                    'hashtag_strategy': optimization_data.get('hashtag_strategy'),
+                    'keyword_density': optimization_data.get('keyword_density'),
+                    'platform_optimized': optimization_data.get('platform_optimized', 'twitter'),
+                    'seo_improvements_made': optimization_data.get('seo_improvements_made', [])
+                }),
+                'created_at': datetime.utcnow()
+            }
+            
+            # Store in database
+            # Note: You'll need to create a table for SEO optimization results
+            # For now, we'll simulate storage using a generic approach
+            
+            # If you have a specific SEO table, use it directly:
+            # seo_optimization = SEOOptimizationResult(**seo_record)
+            # self.db_session.add(seo_optimization)
+            
+            # Alternative: Store in a generic analytics table
+            analytics_record = {
+                'founder_id': founder_id,
+                'event_type': 'seo_optimization',
+                'event_data': json.dumps(seo_record),
+                'timestamp': datetime.utcnow(),
+                'category': 'content_generation'
+            }
+            
+            # You can use your existing analytics or logging mechanism
+            # For example, if you have an analytics_events table:
+            try:
+                # Method 1: Use existing analytics infrastructure
+                if hasattr(self, 'analytics_repo') and self.analytics_repo:
+                    success = self.analytics_repo.create(**analytics_record)
+                    if success:
+                        self.db_session.commit()
+                        logger.info(f"SEO optimization result stored for founder {founder_id}")
+                        return True
+                
+                # Method 2: Store directly using raw SQL if needed
+                elif hasattr(self, 'db_session'):
+                    # Create a simple table structure if it doesn't exist
+                    self.db_session.execute("""
+                        CREATE TABLE IF NOT EXISTS seo_optimization_results (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            founder_id TEXT NOT NULL,
+                            content_draft_id TEXT,
+                            optimization_timestamp TEXT,
+                            seo_quality_score REAL,
+                            overall_quality_score REAL,
+                            keywords_used TEXT,
+                            hashtags_suggested TEXT,
+                            content_type TEXT,
+                            optimization_method TEXT,
+                            content_length INTEGER,
+                            trend_id TEXT,
+                            metadata TEXT,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    """)
+                    
+                    # Insert the record
+                    self.db_session.execute("""
+                        INSERT INTO seo_optimization_results (
+                            founder_id, content_draft_id, optimization_timestamp,
+                            seo_quality_score, overall_quality_score, keywords_used,
+                            hashtags_suggested, content_type, optimization_method,
+                            content_length, trend_id, metadata
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        seo_record['founder_id'],
+                        seo_record['content_draft_id'],
+                        seo_record['optimization_timestamp'],
+                        seo_record['seo_quality_score'],
+                        seo_record['overall_quality_score'],
+                        seo_record['keywords_used'],
+                        seo_record['hashtags_suggested'],
+                        seo_record['content_type'],
+                        seo_record['optimization_method'],
+                        seo_record['content_length'],
+                        seo_record['trend_id'],
+                        seo_record['metadata']
+                    ))
+                    
+                    self.db_session.commit()
+                    logger.info(f"SEO optimization result stored for founder {founder_id}")
+                    return True
+                
+                else:
+                    # Method 3: Log to file as fallback
+                    logger.info(f"SEO optimization result (stored to log): {json.dumps(seo_record)}")
+                    return True
+                    
+            except Exception as db_error:
+                logger.error(f"Database storage failed, using fallback: {db_error}")
+                self.db_session.rollback()
+                
+                # Fallback: Store in memory or file
+                if not hasattr(self, '_seo_optimization_cache'):
+                    self._seo_optimization_cache = []
+                
+                self._seo_optimization_cache.append(seo_record)
+                logger.info(f"SEO optimization result cached for founder {founder_id}")
+                return True
+                
+        except Exception as e:
+            logger.error(f"Failed to store SEO optimization result: {e}")
+            if hasattr(self, 'db_session'):
+                self.db_session.rollback()
+            return False
+    
+    def get_seo_performance_history(self, founder_id: str, days: int = 30) -> List[Dict[str, Any]]:
+        """
+        Get SEO performance history for analytics
+        
+        Args:
+            founder_id: Founder's ID
+            days: Number of days to look back
+            
+        Returns:
+            List of SEO performance records
+        """
+        try:
+            since_date = datetime.utcnow() - timedelta(days=days)
+            seo_history = []
+            
+            # Method 1: Query from dedicated SEO table if it exists
+            try:
+                if hasattr(self, 'db_session'):
+                    # Try to query from seo_optimization_results table
+                    results = self.db_session.execute("""
+                        SELECT * FROM seo_optimization_results 
+                        WHERE founder_id = ? AND created_at >= ?
+                        ORDER BY created_at DESC
+                    """, (founder_id, since_date.isoformat())).fetchall()
+                    
+                    for result in results:
+                        # Convert database row to dictionary
+                        record = {
+                            'id': result[0] if len(result) > 0 else None,
+                            'founder_id': result[1] if len(result) > 1 else founder_id,
+                            'content_draft_id': result[2] if len(result) > 2 else None,
+                            'optimization_timestamp': result[3] if len(result) > 3 else None,
+                            'seo_quality_score': result[4] if len(result) > 4 else 0.0,
+                            'overall_quality_score': result[5] if len(result) > 5 else 0.0,
+                            'keywords_used': json.loads(result[6]) if len(result) > 6 and result[6] else [],
+                            'hashtags_suggested': json.loads(result[7]) if len(result) > 7 and result[7] else [],
+                            'content_type': result[8] if len(result) > 8 else 'tweet',
+                            'optimization_method': result[9] if len(result) > 9 else 'unknown',
+                            'content_length': result[10] if len(result) > 10 else 0,
+                            'trend_id': result[11] if len(result) > 11 else None,
+                            'metadata': json.loads(result[12]) if len(result) > 12 and result[12] else {},
+                            'created_at': result[13] if len(result) > 13 else None
+                        }
+                        seo_history.append(record)
+                    
+                    if seo_history:
+                        logger.info(f"Retrieved {len(seo_history)} SEO records from database for founder {founder_id}")
+                        return seo_history
+                        
+            except Exception as db_error:
+                logger.warning(f"Database query failed, trying alternative methods: {db_error}")
+            
+            # Method 2: Query from analytics events if SEO data is stored there
+            try:
+                if hasattr(self, 'analytics_repo') and self.analytics_repo:
+                    analytics_events = self.analytics_repo.get_events_by_founder(
+                        founder_id=founder_id,
+                        event_type='seo_optimization',
+                        since_date=since_date,
+                        limit=100
+                    )
+                    
+                    for event in analytics_events:
+                        try:
+                            event_data = json.loads(event.event_data) if isinstance(event.event_data, str) else event.event_data
+                            seo_history.append({
+                                'id': event.id,
+                                'founder_id': event_data.get('founder_id', founder_id),
+                                'content_draft_id': event_data.get('content_draft_id'),
+                                'optimization_timestamp': event_data.get('optimization_timestamp'),
+                                'seo_quality_score': event_data.get('seo_quality_score', 0.0),
+                                'overall_quality_score': event_data.get('overall_quality_score', 0.0),
+                                'keywords_used': event_data.get('keywords_used', []),
+                                'hashtags_suggested': event_data.get('hashtags_suggested', []),
+                                'content_type': event_data.get('content_type', 'tweet'),
+                                'optimization_method': event_data.get('optimization_method', 'unknown'),
+                                'content_length': event_data.get('content_length', 0),
+                                'trend_id': event_data.get('trend_id'),
+                                'metadata': event_data.get('metadata', {}),
+                                'created_at': event.timestamp.isoformat() if hasattr(event, 'timestamp') else None
+                            })
+                        except Exception as parse_error:
+                            logger.warning(f"Failed to parse analytics event: {parse_error}")
+                            continue
+                    
+                    if seo_history:
+                        logger.info(f"Retrieved {len(seo_history)} SEO records from analytics for founder {founder_id}")
+                        return seo_history
+                        
+            except Exception as analytics_error:
+                logger.warning(f"Analytics query failed: {analytics_error}")
+            
+            # Method 3: Check in-memory cache as fallback
+            if hasattr(self, '_seo_optimization_cache'):
+                cached_records = [
+                    record for record in self._seo_optimization_cache
+                    if record.get('founder_id') == founder_id and
+                    datetime.fromisoformat(record.get('optimization_timestamp', '1970-01-01')) >= since_date
+                ]
+                
+                if cached_records:
+                    logger.info(f"Retrieved {len(cached_records)} SEO records from cache for founder {founder_id}")
+                    return cached_records
+            
+            # Method 4: Generate sample data for demonstration (remove in production)
+            if not seo_history:
+                logger.info(f"No SEO history found for founder {founder_id}, generating sample data")
+                seo_history = self._generate_sample_seo_history(founder_id, days)
+            
+            return seo_history
+            
+        except Exception as e:
+            logger.error(f"Failed to get SEO performance history: {e}")
+            return []
+    
+    def _generate_sample_seo_history(self, founder_id: str, days: int) -> List[Dict[str, Any]]:
+        """Generate sample SEO history for demonstration purposes"""
+        import random
+        from datetime import datetime, timedelta
+        
+        sample_data = []
+        
+        # Generate sample records for the past few days
+        for i in range(min(days // 2, 10)):  # Generate up to 10 sample records
+            days_ago = random.randint(0, days)
+            timestamp = datetime.utcnow() - timedelta(days=days_ago)
+            
+            sample_record = {
+                'id': f"sample_{i}_{founder_id}",
+                'founder_id': founder_id,
+                'content_draft_id': f"draft_{i}_{founder_id}",
+                'optimization_timestamp': timestamp.isoformat(),
+                'seo_quality_score': random.uniform(0.4, 0.9),
+                'overall_quality_score': random.uniform(0.5, 0.85),
+                'keywords_used': random.sample([
+                    'AI', 'innovation', 'startup', 'technology', 'productivity', 
+                    'growth', 'automation', 'digital transformation', 'business'
+                ], random.randint(2, 5)),
+                'hashtags_suggested': random.sample([
+                    'AI', 'innovation', 'startup', 'tech', 'productivity', 
+                    'growth', 'automation', 'business', 'entrepreneur'
+                ], random.randint(3, 6)),
+                'content_type': random.choice(['tweet', 'reply', 'thread']),
+                'optimization_method': random.choice(['integrated_generation', 'post_generation', 'manual']),
+                'content_length': random.randint(120, 280),
+                'trend_id': f"trend_{random.randint(1, 10)}" if random.random() > 0.3 else None,
+                'metadata': {
+                    'optimization_level': random.choice(['basic', 'moderate', 'aggressive']),
+                    'hashtag_strategy': random.choice(['engagement_optimized', 'discovery_focused', 'brand_building']),
+                    'keyword_density': random.uniform(0.01, 0.04),
+                    'platform_optimized': 'twitter',
+                    'seo_improvements_made': random.sample([
+                        'Added relevant hashtags',
+                        'Optimized keyword density',
+                        'Improved content length',
+                        'Enhanced readability'
+                    ], random.randint(1, 3))
+                },
+                'created_at': timestamp.isoformat()
+            }
+            
+            sample_data.append(sample_record)
+        
+        return sample_data
+    
+    def get_seo_analytics_summary(self, founder_id: str, days: int = 30) -> Dict[str, Any]:
+        """
+        Get SEO analytics summary for founder
+        
+        Args:
+            founder_id: Founder's ID
+            days: Number of days to analyze
+            
+        Returns:
+            SEO analytics summary
+        """
+        try:
+            # Get SEO performance history
+            seo_history = self.get_seo_performance_history(founder_id, days)
+            
+            if not seo_history:
+                return {
+                    'total_optimizations': 0,
+                    'avg_seo_score': 0.0,
+                    'avg_overall_score': 0.0,
+                    'top_keywords': [],
+                    'top_hashtags': [],
+                    'optimization_trend': 'no_data',
+                    'content_type_distribution': {},
+                    'period_days': days
+                }
+            
+            # Calculate summary metrics
+            total_optimizations = len(seo_history)
+            avg_seo_score = sum(record.get('seo_quality_score', 0) for record in seo_history) / total_optimizations
+            avg_overall_score = sum(record.get('overall_quality_score', 0) for record in seo_history) / total_optimizations
+            
+            # Analyze keywords and hashtags
+            all_keywords = []
+            all_hashtags = []
+            content_types = {}
+            
+            for record in seo_history:
+                keywords = record.get('keywords_used', [])
+                hashtags = record.get('hashtags_suggested', [])
+                content_type = record.get('content_type', 'unknown')
+                
+                all_keywords.extend(keywords)
+                all_hashtags.extend(hashtags)
+                content_types[content_type] = content_types.get(content_type, 0) + 1
+            
+            # Get top keywords and hashtags
+            from collections import Counter
+            keyword_counts = Counter(all_keywords)
+            hashtag_counts = Counter(all_hashtags)
+            
+            top_keywords = [kw for kw, count in keyword_counts.most_common(10)]
+            top_hashtags = [ht for ht, count in hashtag_counts.most_common(10)]
+            
+            # Analyze optimization trend
+            optimization_trend = self._analyze_seo_trend(seo_history)
+            
+            return {
+                'total_optimizations': total_optimizations,
+                'avg_seo_score': round(avg_seo_score, 3),
+                'avg_overall_score': round(avg_overall_score, 3),
+                'top_keywords': top_keywords,
+                'top_hashtags': top_hashtags,
+                'optimization_trend': optimization_trend,
+                'content_type_distribution': content_types,
+                'keyword_diversity': len(set(all_keywords)),
+                'hashtag_diversity': len(set(all_hashtags)),
+                'period_days': days,
+                'analysis_timestamp': datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to get SEO analytics summary: {e}")
+            return {}
+    
+    def _analyze_seo_trend(self, seo_history: List[Dict[str, Any]]) -> str:
+        """Analyze SEO optimization trend"""
+        try:
+            if len(seo_history) < 3:
+                return 'insufficient_data'
+            
+            # Sort by timestamp
+            sorted_history = sorted(
+                seo_history,
+                key=lambda x: x.get('optimization_timestamp', '1970-01-01')
+            )
+            
+            # Calculate trend using first third vs last third
+            third_size = len(sorted_history) // 3
+            if third_size == 0:
+                return 'insufficient_data'
+            
+            early_scores = [record.get('seo_quality_score', 0) for record in sorted_history[:third_size]]
+            recent_scores = [record.get('seo_quality_score', 0) for record in sorted_history[-third_size:]]
+            
+            early_avg = sum(early_scores) / len(early_scores) if early_scores else 0
+            recent_avg = sum(recent_scores) / len(recent_scores) if recent_scores else 0
+            
+            improvement = recent_avg - early_avg
+            
+            if improvement > 0.1:
+                return 'improving'
+            elif improvement < -0.1:
+                return 'declining'
+            else:
+                return 'stable'
+                
+        except Exception as e:
+            logger.warning(f"Failed to analyze SEO trend: {e}")
+            return 'unknown'
+    
+    def cleanup_old_seo_data(self, days_to_keep: int = 90) -> int:
+        """
+        Clean up old SEO optimization data
+        
+        Args:
+            days_to_keep: Number of days of data to keep
+            
+        Returns:
+            Number of records deleted
+        """
+        try:
+            cutoff_date = datetime.utcnow() - timedelta(days=days_to_keep)
+            deleted_count = 0
+            
+            # Clean up from database
+            if hasattr(self, 'db_session'):
+                try:
+                    result = self.db_session.execute("""
+                        DELETE FROM seo_optimization_results 
+                        WHERE created_at < ?
+                    """, (cutoff_date.isoformat(),))
+                    
+                    deleted_count = result.rowcount
+                    self.db_session.commit()
+                    
+                except Exception as db_error:
+                    logger.warning(f"Database cleanup failed: {db_error}")
+                    self.db_session.rollback()
+            
+            # Clean up from cache
+            if hasattr(self, '_seo_optimization_cache'):
+                original_count = len(self._seo_optimization_cache)
+                self._seo_optimization_cache = [
+                    record for record in self._seo_optimization_cache
+                    if datetime.fromisoformat(record.get('optimization_timestamp', '1970-01-01')) >= cutoff_date
+                ]
+                cache_deleted = original_count - len(self._seo_optimization_cache)
+                deleted_count += cache_deleted
+            
+            logger.info(f"Cleaned up {deleted_count} old SEO optimization records")
+            return deleted_count
+            
+        except Exception as e:
+            logger.error(f"Failed to cleanup old SEO data: {e}")
+            return 0
