@@ -2,6 +2,8 @@
 
 This demo shows how to integrate and use the LLM-enhanced SEO functionality
 with your existing content generation system.
+
+Run python -m modules.seo.demo_seo to test
 """
 
 import asyncio
