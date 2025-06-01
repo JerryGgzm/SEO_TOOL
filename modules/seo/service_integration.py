@@ -451,8 +451,9 @@ class SEOService:
         Enhance suggestions with LLM insights (don't await the suggestions parameter)
         """
         try:
-            # Convert content type
-            seo_content_type = self._convert_content_type_from_string(content_type) if isinstance(seo_content_type, str) else seo_content_type
+            # Convert content type (fix: use seo_content_type instead of undefined content_type)
+            if isinstance(seo_content_type, str):
+                seo_content_type = self._convert_content_type_from_string(seo_content_type)
             
             # Get base suggestions from optimizer (synchronous call)
             if hasattr(self.optimizer, 'get_content_suggestions'):

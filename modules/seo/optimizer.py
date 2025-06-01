@@ -143,7 +143,7 @@ class SEOOptimizer(BaseSEOOptimizer):
         try:
             # Check if LLM optimization is available and enabled
             if (self.llm_intelligence and 
-                self.optimization_mode in ['hybrid', 'llm_enhanced']):
+                self.llm_config.get('llm_optimization_mode') in ['hybrid', 'llm_enhanced']):
                 
                 try:
                     # Use LLM for optimization
@@ -316,7 +316,7 @@ class SEOOptimizer(BaseSEOOptimizer):
                 return await self._hybrid_optimization(request, context)
                 
         except Exception as e:
-            logger.error(f"Intelligent optimization failed: {e}")
+            logger.error(f"Intelligent optimization failed 1: {e}")
             return await self._hybrid_optimization(request, context)
     
     def _determine_intelligent_strategy(self, analysis: Dict[str, Any],
@@ -770,7 +770,7 @@ class SEOOptimizer(BaseSEOOptimizer):
             }
             
         except Exception as e:
-            logger.error(f"Intelligent optimization failed: {str(e)}")
+            logger.error(f"Intelligent optimization failed 2: {str(e)}")
             return {
                 'optimized_content': text,
                 'optimization_score': 0.5,

@@ -10,6 +10,10 @@ class SEOContentType(Enum):
     LINKEDIN_POST = "linkedin_post"
     FACEBOOK_POST = "facebook_post"
     BLOG_POST = "blog_post"
+    REPLY = "reply"
+    THREAD = "thread"
+    QUOTE_TWEET = "quote_tweet"
+
 
 class SEOOptimizationLevel(Enum):
     LIGHT = "light"

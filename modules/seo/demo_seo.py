@@ -651,7 +651,7 @@ async def demo_performance_comparison():
                     enhanced_content = enhanced_result.optimized_content
                     llm_enhanced = False
                 except Exception as e:
-                    print("Got an exception", e)
+                    print("Got an exception HERE", e)
                     enhanced_score = traditional_score
                     enhanced_content = traditional_content
                     llm_enhanced = False
