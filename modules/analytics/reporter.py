@@ -177,40 +177,23 @@ class ComprehensiveAnalyticsService:
         self.seo_analyzer = SEOPerformanceAnalyzer(data_flow_manager, seo_service)
         self.trend_reporter = TrendAnalysisReporter(data_flow_manager)
     
-    async def generate_comprehensive_report(self, founder_id: str, 
-                                          days: int = 30) -> Dict[str, Any]:
+    def generate_comprehensive_report(self, founder_id: str, 
+                                    days: int = 30) -> Dict[str, Any]:
         """Generate comprehensive analysis report"""
         try:
             logger.info(f"Generating comprehensive analysis report for founder {founder_id}")
             
-            # Execute all analyses in parallel
-            content_analysis, seo_analysis, trend_analysis = await asyncio.gather(
-                asyncio.to_thread(self.content_analyzer.analyze_content_performance, founder_id, days),
-                asyncio.to_thread(self.seo_analyzer.analyze_seo_performance, founder_id, days),
-                asyncio.to_thread(self.trend_reporter.generate_trend_report, founder_id, days),
-                return_exceptions=True
-            )
+            # Execute all analyses sequentially
+            content_analysis = self.content_analyzer.analyze_content_performance(founder_id, days)
+            seo_analysis = self.seo_analyzer.analyze_seo_performance(founder_id, days)
+            trend_analysis = self.trend_reporter.generate_trend_report(founder_id, days)
             
-            # Handle possible exceptions
-            if isinstance(content_analysis, Exception):
-                logger.error(f"Content analysis failed: {content_analysis}")
-                content_analysis = {}
-            
-            if isinstance(seo_analysis, Exception):
-                logger.error(f"SEO analysis failed: {seo_analysis}")
-                seo_analysis = {}
-            
-            if isinstance(trend_analysis, Exception):
-                logger.error(f"Trend analysis failed: {trend_analysis}")
-                trend_analysis = {}
-            
-            # Generate comprehensive insights
-            comprehensive_insights = self._generate_comprehensive_insights(
+            # Generate insights and recommendations
+            insights = self._generate_comprehensive_insights(
                 content_analysis, seo_analysis, trend_analysis
             )
             
-            # Generate action recommendations
-            action_recommendations = self._generate_action_recommendations(
+            recommendations = self._generate_action_recommendations(
                 content_analysis, seo_analysis, trend_analysis
             )
             
@@ -219,27 +202,26 @@ class ComprehensiveAnalyticsService:
                 content_analysis, seo_analysis, trend_analysis
             )
             
+            # Compile final report
             report = {
-                'report_generated_at': datetime.now(timezone.utc).isoformat(),
-                'analysis_period_days': days,
                 'founder_id': founder_id,
+                'analysis_period': days,
+                'generated_at': datetime.now(timezone.utc).isoformat(),
                 'overall_performance_score': overall_score,
                 'content_performance': content_analysis,
                 'seo_performance': seo_analysis,
                 'trend_analysis': trend_analysis,
-                'comprehensive_insights': comprehensive_insights,
-                'action_recommendations': action_recommendations,
-                'next_review_date': (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+                'comprehensive_insights': insights,
+                'action_recommendations': recommendations
             }
             
-            # Store report to database
+            # Store report for future reference
             self._store_analytics_report(founder_id, report)
             
-            logger.info(f"Comprehensive analysis report generation completed")
             return report
             
         except Exception as e:
-            logger.error(f"Comprehensive analysis report generation failed: {e}")
+            logger.error(f"Failed to generate comprehensive report: {e}")
             return self._empty_comprehensive_report(founder_id, days)
     
     def _generate_comprehensive_insights(self, content_analysis: Dict, 

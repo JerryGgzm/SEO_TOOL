@@ -1,7 +1,7 @@
 """Enhanced content generation service with SEO integration"""
 import asyncio
 from typing import List, Dict, Any, Optional, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import logging
 
 from database import DataFlowManager
@@ -16,6 +16,8 @@ from .generator import ContentGenerator, ContentGenerationFactory
 from .database_adapter import ContentGenerationDatabaseAdapter
 
 logger = logging.getLogger(__name__)
+
+UTC = timezone.utc
 
 class ContentGenerationService:
     """
@@ -525,7 +527,6 @@ class ContentGenerationService:
         
         try:
             # Get recent drafts
-            from datetime import datetime, UTC
             since_date = datetime.now(UTC) - timedelta(days=days)
             
             recent_drafts = self.data_flow_manager.db_session.query(

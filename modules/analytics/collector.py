@@ -452,3 +452,10 @@ class AnalyticsCollector:
         except Exception as e:
             logger.error(f"Simple trend calculation failed: {e}")
             return 'stable'
+
+    async def collect_batch_analytics(self, tweet_ids: List[str]) -> Dict[str, Any]:
+        """Collect analytics for multiple tweets"""
+        results = {}
+        for tweet_id in tweet_ids:
+            results[tweet_id] = await self._get_content_analytics(tweet_id)
+        return results

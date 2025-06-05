@@ -6,13 +6,16 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship, Session
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID, JSONB
 from sqlalchemy.sql import func
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 import uuid
 import json
 from sqlalchemy.types import TypeDecorator, CHAR
 
 Base = declarative_base()
+
+# 使用 timezone.utc 替代 UTC
+UTC = timezone.utc
 
 class UUID(TypeDecorator):
     """Create a UUID type for SQLite for compatibility with PostgreSQL in tests"""

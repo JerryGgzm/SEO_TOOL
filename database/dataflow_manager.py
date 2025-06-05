@@ -1,5 +1,5 @@
 from typing import Dict, Any, List, Optional, Tuple
-from datetime import datetime, timedelta, UTC
+from datetime import datetime, timedelta, timezone
 import logging
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
@@ -13,6 +13,8 @@ from .repositories import (
 from .models import *
 
 logger = logging.getLogger(__name__)
+
+UTC = timezone.utc
 
 class DataFlowManager:
     """

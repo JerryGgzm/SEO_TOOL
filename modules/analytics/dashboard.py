@@ -13,17 +13,17 @@ class AnalyticsDashboard:
         self.analytics_service = analytics_service
         self.collector = AnalyticsCollector(analytics_service.data_flow_manager)
     
-    async def get_dashboard_data(self, founder_id: str) -> Dict[str, Any]:
+    def get_dashboard_data(self, founder_id: str) -> Dict[str, Any]:
         """Get dashboard data"""
         try:
             # Collect real-time metrics
             real_time_metrics = self.collector.collect_real_time_metrics(founder_id)
             
             # Get quick analysis (last 7 days)
-            quick_analysis = await self.analytics_service.generate_comprehensive_report(founder_id, 7)
+            quick_analysis = self.analytics_service.generate_comprehensive_report(founder_id, 7)
             
             # Get key metrics trends (last 30 days)
-            monthly_trends = await self._get_monthly_trends(founder_id)
+            monthly_trends = self._get_monthly_trends(founder_id)
             
             return {
                 'real_time_metrics': real_time_metrics,
@@ -40,11 +40,11 @@ class AnalyticsDashboard:
             logger.error(f"Failed to get dashboard data: {e}")
             return {}
     
-    async def _get_monthly_trends(self, founder_id: str) -> Dict[str, Any]:
+    def _get_monthly_trends(self, founder_id: str) -> Dict[str, Any]:
         """Get monthly trends"""
         try:
             # Get detailed analysis for the last 30 days
-            monthly_report = await self.analytics_service.generate_comprehensive_report(founder_id, 30)
+            monthly_report = self.analytics_service.generate_comprehensive_report(founder_id, 30)
             
             return {
                 'content_trend': monthly_report.get('content_performance', {}).get('growth_metrics', {}),
