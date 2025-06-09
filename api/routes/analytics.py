@@ -1,3 +1,22 @@
+"""
+Analytics API Module
+
+This module provides RESTful API endpoints for Twitter analytics functionality.
+It includes endpoints for dashboard data, post analytics, data collection, and overview statistics.
+
+Key Features:
+- User dashboard analytics with customizable date ranges
+- Detailed analytics for individual tweets
+- Batch analytics for multiple tweets
+- Analytics overview with different time periods
+- Authentication required for all endpoints
+
+Dependencies:
+- Flask: Web framework
+- SQLAlchemy: Database ORM
+- datetime: Date handling
+"""
+
 from flask import Blueprint, request, jsonify
 from datetime import datetime, timedelta
 from typing import List, Optional
@@ -6,11 +25,27 @@ from database.models import PostAnalytic, Founder
 from database import get_db_context
 from functools import wraps
 
-# 创建蓝图
+# Create blueprint for analytics routes
 analytics_bp = Blueprint('analytics', __name__)
 
 def require_auth(f):
-    """Authentication decorator"""
+    """
+    Authentication decorator for protecting analytics endpoints.
+    
+    This decorator:
+    1. Checks for the presence of an Authorization header
+    2. Extracts the Bearer token
+    3. Validates the token (TODO: implement actual validation)
+    
+    Args:
+        f: The function to be decorated
+        
+    Returns:
+        Decorated function that checks authentication before execution
+        
+    Raises:
+        401 Unauthorized if token is missing or invalid
+    """
     @wraps(f)
     def decorated_function(*args, **kwargs):
         token = request.headers.get('Authorization')
@@ -20,7 +55,7 @@ def require_auth(f):
         if token.startswith('Bearer '):
             token = token[7:]
         
-        # TODO: 实现token验证逻辑
+        # TODO: Implement token validation logic
         # payload = verify_jwt_token(token)
         # if 'error' in payload:
         #     return jsonify({'error': payload['error']}), 401
@@ -33,7 +68,32 @@ def require_auth(f):
 @analytics_bp.route('/dashboard/<user_id>', methods=['GET'])
 @require_auth
 def get_dashboard(user_id: str):
-    """Get user's analytics dashboard data"""
+    """
+    Get user's analytics dashboard data with customizable date range.
+    
+    This endpoint provides aggregated analytics data for a user's tweets within a specified time period.
+    It calculates key metrics like total impressions, engagements, and average engagement rate.
+    
+    Args:
+        user_id (str): The ID of the user whose analytics are being requested
+        
+    Query Parameters:
+        date_range (str): Time range for analytics ('7d', '30d', '90d', or 'custom')
+        start_date (str): Start date for custom range (format: YYYY-MM-DD)
+        end_date (str): End date for custom range (format: YYYY-MM-DD)
+        
+    Returns:
+        JSON response containing:
+        - Total impressions
+        - Total engagements
+        - Average engagement rate
+        - Number of posts analyzed
+        - Date range information
+        
+    Raises:
+        400 Bad Request if date parameters are invalid
+        401 Unauthorized if authentication fails
+    """
     date_range = request.args.get('date_range')
     start_date = request.args.get('start_date')
     end_date = request.args.get('end_date')
@@ -86,7 +146,29 @@ def get_dashboard(user_id: str):
 @analytics_bp.route('/posts/<tweet_id>', methods=['GET'])
 @require_auth
 def get_post_analytics(tweet_id: str):
-    """Get detailed analytics for a specific tweet"""
+    """
+    Get detailed analytics for a specific tweet.
+    
+    This endpoint provides comprehensive analytics data for a single tweet,
+    including impressions, various engagement metrics, and conversion data.
+    
+    Args:
+        tweet_id (str): The ID of the tweet to analyze
+        
+    Returns:
+        JSON response containing:
+        - Tweet ID
+        - Impressions
+        - Engagement metrics (likes, retweets, replies, quote tweets)
+        - Engagement rate
+        - Link clicks
+        - Profile visits
+        - Posting and last update timestamps
+        
+    Raises:
+        404 Not Found if tweet analytics don't exist
+        401 Unauthorized if authentication fails
+    """
     with get_db_context() as db:
         analytics = db.query(PostAnalytic).filter(
             PostAnalytic.posted_tweet_id == tweet_id
@@ -117,7 +199,28 @@ def get_post_analytics(tweet_id: str):
 @analytics_bp.route('/posts', methods=['GET'])
 @require_auth
 def get_user_posts_analytics():
-    """Get analytics for all user's posts"""
+    """
+    Get analytics for all user's posts with pagination and sorting options.
+    
+    This endpoint provides analytics data for all tweets by a specific user,
+    with support for pagination and different sorting criteria.
+    
+    Query Parameters:
+        user_id (str): Required. The ID of the user whose posts to analyze
+        limit (int): Optional. Number of posts per page (default: 20)
+        offset (int): Optional. Number of posts to skip (default: 0)
+        sort_by (str): Optional. Sort criteria ('engagement', 'likes', 'retweets', 'replies', 'date')
+        
+    Returns:
+        JSON response containing:
+        - Total number of posts
+        - Pagination information
+        - List of posts with their analytics data
+        
+    Raises:
+        400 Bad Request if required parameters are missing or invalid
+        401 Unauthorized if authentication fails
+    """
     user_id = request.args.get('user_id')
     if not user_id:
         return jsonify({'error': 'user_id is required'}), 400
@@ -169,7 +272,24 @@ def get_user_posts_analytics():
 @analytics_bp.route('/collect/<tweet_id>', methods=['POST'])
 @require_auth
 def collect_tweet_analytics(tweet_id: str):
-    """Trigger analytics collection for a specific tweet"""
+    """
+    Trigger analytics collection for a specific tweet.
+    
+    This endpoint initiates the collection of analytics data for a single tweet.
+    It's designed to be called asynchronously, as data collection may take time.
+    
+    Args:
+        tweet_id (str): The ID of the tweet to collect analytics for
+        
+    Returns:
+        JSON response indicating collection has started
+        
+    Note:
+        This is a placeholder endpoint. Actual Twitter API integration needs to be implemented.
+        
+    Raises:
+        401 Unauthorized if authentication fails
+    """
     # TODO: Implement actual Twitter API call to collect analytics
     # This is a placeholder that would need to be implemented with actual Twitter API integration
     return jsonify({
@@ -183,7 +303,26 @@ def collect_tweet_analytics(tweet_id: str):
 @analytics_bp.route('/collect/batch', methods=['POST'])
 @require_auth
 def collect_batch_analytics():
-    """Trigger analytics collection for multiple tweets"""
+    """
+    Trigger analytics collection for multiple tweets in batch.
+    
+    This endpoint initiates the collection of analytics data for multiple tweets simultaneously.
+    It's designed to be called asynchronously, as batch collection may take significant time.
+    
+    Request Body:
+        JSON object containing:
+        - tweet_ids (list): List of tweet IDs to collect analytics for
+        
+    Returns:
+        JSON response indicating batch collection has started
+        
+    Note:
+        This is a placeholder endpoint. Actual Twitter API integration needs to be implemented.
+        
+    Raises:
+        400 Bad Request if tweet_ids are missing
+        401 Unauthorized if authentication fails
+    """
     data = request.get_json()
     if not data or 'tweet_ids' not in data:
         return jsonify({'error': 'tweet_ids is required in request body'}), 400
@@ -201,7 +340,31 @@ def collect_batch_analytics():
 @analytics_bp.route('/overview/<user_id>', methods=['GET'])
 @require_auth
 def get_analytics_overview(user_id: str):
-    """Get analytics overview statistics"""
+    """
+    Get analytics overview statistics for a user.
+    
+    This endpoint provides aggregated analytics data for a user's tweets
+    over different time periods (daily, weekly, monthly).
+    
+    Args:
+        user_id (str): The ID of the user whose analytics are being requested
+        
+    Query Parameters:
+        period (str): Time period for overview ('daily', 'weekly', 'monthly')
+        
+    Returns:
+        JSON response containing:
+        - Period information
+        - Total posts
+        - Total impressions
+        - Total engagements
+        - Average engagement rate
+        - Date range information
+        
+    Raises:
+        400 Bad Request if period parameter is invalid
+        401 Unauthorized if authentication fails
+    """
     period = request.args.get('period')
     if not period or period not in ['daily', 'weekly', 'monthly']:
         return jsonify({'error': 'Invalid period parameter'}), 400

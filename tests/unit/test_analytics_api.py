@@ -1,4 +1,30 @@
-"""Test cases for analytics API endpoints"""
+"""
+Analytics API Test Suite
+
+This module contains comprehensive test cases for the analytics API endpoints.
+It tests all major functionality including dashboard data, post analytics, data collection,
+and overview statistics.
+
+Test Coverage:
+- Authentication and authorization
+- Dashboard data retrieval with different date ranges
+- Individual post analytics
+- User's all posts analytics with pagination and sorting
+- Analytics data collection (single and batch)
+- Analytics overview with different time periods
+
+Test Structure:
+- Uses pytest fixtures for common setup
+- Mocks database sessions and responses
+- Tests both success and error cases
+- Validates response formats and status codes
+
+Dependencies:
+- pytest: Testing framework
+- Flask test client: For making test requests
+- unittest.mock: For mocking dependencies
+"""
+
 import pytest
 from datetime import datetime, timedelta
 from unittest.mock import Mock, patch
@@ -6,7 +32,7 @@ import json
 from api import create_app
 from database.models import PostAnalytic
 
-# Test data
+# Test data constants
 MOCK_USER_ID = "test_user_123"
 MOCK_TWEET_ID = "tweet_123"
 MOCK_ANALYTICS_DATA = {
@@ -24,19 +50,47 @@ MOCK_ANALYTICS_DATA = {
 
 @pytest.fixture
 def app():
-    """Create test Flask app"""
+    """
+    Create a test Flask application instance.
+    
+    This fixture:
+    1. Creates a new Flask app
+    2. Configures it for testing
+    3. Returns the configured app
+    
+    Returns:
+        Flask: A configured Flask application instance for testing
+    """
     app = create_app()
     app.config['TESTING'] = True
     return app
 
 @pytest.fixture
 def client(app):
-    """Create test client"""
+    """
+    Create a test client for making requests to the Flask application.
+    
+    Args:
+        app: The Flask application instance from the app fixture
+        
+    Returns:
+        FlaskClient: A test client for making requests to the application
+    """
     return app.test_client()
 
 @pytest.fixture
 def mock_db_session():
-    """Mock database session"""
+    """
+    Create a mock database session.
+    
+    This fixture:
+    1. Mocks the database context manager
+    2. Provides a mock session object
+    3. Ensures proper cleanup after tests
+    
+    Yields:
+        Mock: A mock database session object
+    """
     with patch('api.routes.analytics.get_db_context') as mock:
         session = Mock()
         mock.return_value.__enter__.return_value = session
@@ -44,7 +98,17 @@ def mock_db_session():
 
 @pytest.fixture
 def mock_post_analytics():
-    """Create mock PostAnalytic object"""
+    """
+    Create a mock PostAnalytic object with test data.
+    
+    This fixture:
+    1. Creates a mock object with PostAnalytic specification
+    2. Populates it with test data
+    3. Mocks the total_engagements property
+    
+    Returns:
+        Mock: A mock PostAnalytic object with test data
+    """
     analytics = Mock(spec=PostAnalytic)
     analytics.posted_tweet_id = MOCK_TWEET_ID
     analytics.founder_id = MOCK_USER_ID
@@ -70,10 +134,30 @@ def mock_post_analytics():
     return analytics
 
 class TestAnalyticsDashboard:
-    """Test analytics dashboard endpoints"""
+    """
+    Test suite for analytics dashboard endpoints.
+    
+    This class contains tests for:
+    - Dashboard data retrieval with different date ranges
+    - Authentication requirements
+    - Response format validation
+    - Error handling
+    """
     
     def test_get_dashboard_7d(self, client, mock_db_session, mock_post_analytics):
-        """Test getting dashboard data for last 7 days"""
+        """
+        Test retrieving dashboard data for the last 7 days.
+        
+        This test:
+        1. Sets up mock data for a 7-day period
+        2. Makes a request to the dashboard endpoint
+        3. Verifies the response format and data
+        
+        Args:
+            client: Flask test client
+            mock_db_session: Mock database session
+            mock_post_analytics: Mock analytics data
+        """
         # Setup mock data
         mock_db_session.query.return_value.filter.return_value.all.return_value = [mock_post_analytics]
         
@@ -95,7 +179,19 @@ class TestAnalyticsDashboard:
         assert data['data']['posts_analyzed'] == 1
     
     def test_get_dashboard_custom_date_range(self, client, mock_db_session, mock_post_analytics):
-        """Test getting dashboard data with custom date range"""
+        """
+        Test retrieving dashboard data with a custom date range.
+        
+        This test:
+        1. Sets up mock data for a custom date range
+        2. Makes a request with start and end dates
+        3. Verifies the response format and data
+        
+        Args:
+            client: Flask test client
+            mock_db_session: Mock database session
+            mock_post_analytics: Mock analytics data
+        """
         # Setup mock data
         mock_db_session.query.return_value.filter.return_value.all.return_value = [mock_post_analytics]
         
@@ -117,17 +213,47 @@ class TestAnalyticsDashboard:
         assert 'data' in data
     
     def test_get_dashboard_missing_auth(self, client):
-        """Test getting dashboard data without authentication"""
+        """
+        Test dashboard endpoint authentication requirement.
+        
+        This test:
+        1. Makes a request without authentication
+        2. Verifies that the request is rejected
+        3. Checks the error response format
+        
+        Args:
+            client: Flask test client
+        """
         response = client.get(f'/api/analytics/dashboard/{MOCK_USER_ID}')
         assert response.status_code == 401
         data = json.loads(response.data)
         assert 'error' in data
 
 class TestPostAnalytics:
-    """Test post analytics endpoints"""
+    """
+    Test suite for individual post analytics endpoints.
+    
+    This class contains tests for:
+    - Single post analytics retrieval
+    - Non-existent post handling
+    - Response format validation
+    - Error handling
+    """
     
     def test_get_post_analytics(self, client, mock_db_session, mock_post_analytics):
-        """Test getting single post analytics"""
+        """
+        Test retrieving analytics for a single post.
+        
+        This test:
+        1. Sets up mock data for a specific post
+        2. Makes a request to the post analytics endpoint
+        3. Verifies the response format and data
+        
+        Args:
+            client: Flask test client
+            mock_db_session: Mock database session
+            mock_post_analytics: Mock analytics data
+        """
         # Setup mock data
         mock_db_session.query.return_value.filter.return_value.first.return_value = mock_post_analytics
         
@@ -145,7 +271,18 @@ class TestPostAnalytics:
         assert data['data']['impressions'] == MOCK_ANALYTICS_DATA['impressions']
     
     def test_get_post_analytics_not_found(self, client, mock_db_session):
-        """Test getting non-existent post analytics"""
+        """
+        Test handling of non-existent post analytics.
+        
+        This test:
+        1. Sets up mock to return no data
+        2. Makes a request for a non-existent post
+        3. Verifies the error response
+        
+        Args:
+            client: Flask test client
+            mock_db_session: Mock database session
+        """
         # Setup mock data
         mock_db_session.query.return_value.filter.return_value.first.return_value = None
         
@@ -161,10 +298,30 @@ class TestPostAnalytics:
         assert 'error' in data
 
 class TestUserPostsAnalytics:
-    """Test user posts analytics endpoints"""
+    """
+    Test suite for user's all posts analytics endpoints.
+    
+    This class contains tests for:
+    - Retrieving analytics for all user's posts
+    - Pagination functionality
+    - Sorting options
+    - Error handling
+    """
     
     def test_get_user_posts_analytics(self, client, mock_db_session, mock_post_analytics):
-        """Test getting all user's posts analytics"""
+        """
+        Test retrieving analytics for all user's posts.
+        
+        This test:
+        1. Sets up mock data for user's posts
+        2. Makes a request with pagination and sorting
+        3. Verifies the response format and data
+        
+        Args:
+            client: Flask test client
+            mock_db_session: Mock database session
+            mock_post_analytics: Mock analytics data
+        """
         # Setup mock data
         mock_db_session.query.return_value.filter.return_value.count.return_value = 1
         mock_db_session.query.return_value.filter.return_value.order_by.return_value.offset.return_value.limit.return_value.all.return_value = [mock_post_analytics]
@@ -190,7 +347,16 @@ class TestUserPostsAnalytics:
         assert data['data']['posts'][0]['tweet_id'] == MOCK_TWEET_ID
     
     def test_get_user_posts_analytics_missing_user_id(self, client):
-        """Test getting posts analytics without user_id"""
+        """
+        Test handling of missing user_id parameter.
+        
+        This test:
+        1. Makes a request without the required user_id
+        2. Verifies the error response
+        
+        Args:
+            client: Flask test client
+        """
         response = client.get(
             '/api/analytics/posts',
             headers={'Authorization': 'Bearer test_token'}
@@ -200,10 +366,26 @@ class TestUserPostsAnalytics:
         assert 'error' in data
 
 class TestAnalyticsCollection:
-    """Test analytics collection endpoints"""
+    """
+    Test suite for analytics data collection endpoints.
+    
+    This class contains tests for:
+    - Single tweet analytics collection
+    - Batch analytics collection
+    - Error handling for missing parameters
+    """
     
     def test_collect_tweet_analytics(self, client):
-        """Test collecting single tweet analytics"""
+        """
+        Test initiating analytics collection for a single tweet.
+        
+        This test:
+        1. Makes a request to collect analytics for a tweet
+        2. Verifies the response format and status
+        
+        Args:
+            client: Flask test client
+        """
         response = client.post(
             f'/api/analytics/collect/{MOCK_TWEET_ID}',
             headers={'Authorization': 'Bearer test_token'}
@@ -215,7 +397,16 @@ class TestAnalyticsCollection:
         assert data['data']['tweet_id'] == MOCK_TWEET_ID
     
     def test_collect_batch_analytics(self, client):
-        """Test collecting batch analytics"""
+        """
+        Test initiating analytics collection for multiple tweets.
+        
+        This test:
+        1. Makes a request to collect analytics for multiple tweets
+        2. Verifies the response format and status
+        
+        Args:
+            client: Flask test client
+        """
         response = client.post(
             '/api/analytics/collect/batch',
             json={'tweet_ids': [MOCK_TWEET_ID, 'tweet_456']},
@@ -228,7 +419,16 @@ class TestAnalyticsCollection:
         assert len(data['data']['tweet_ids']) == 2
     
     def test_collect_batch_analytics_missing_tweet_ids(self, client):
-        """Test collecting batch analytics without tweet_ids"""
+        """
+        Test handling of missing tweet_ids in batch collection.
+        
+        This test:
+        1. Makes a request without tweet_ids
+        2. Verifies the error response
+        
+        Args:
+            client: Flask test client
+        """
         response = client.post(
             '/api/analytics/collect/batch',
             json={},
@@ -239,10 +439,30 @@ class TestAnalyticsCollection:
         assert 'error' in data
 
 class TestAnalyticsOverview:
-    """Test analytics overview endpoints"""
+    """
+    Test suite for analytics overview endpoints.
+    
+    This class contains tests for:
+    - Daily analytics overview
+    - Weekly analytics overview
+    - Monthly analytics overview
+    - Invalid period handling
+    """
     
     def test_get_analytics_overview_daily(self, client, mock_db_session, mock_post_analytics):
-        """Test getting daily analytics overview"""
+        """
+        Test retrieving daily analytics overview.
+        
+        This test:
+        1. Sets up mock data for daily analytics
+        2. Makes a request for daily overview
+        3. Verifies the response format and data
+        
+        Args:
+            client: Flask test client
+            mock_db_session: Mock database session
+            mock_post_analytics: Mock analytics data
+        """
         # Setup mock data
         mock_db_session.query.return_value.filter.return_value.all.return_value = [mock_post_analytics]
         
@@ -260,9 +480,20 @@ class TestAnalyticsOverview:
         assert data['data']['period'] == 'daily'
         assert data['data']['total_posts'] == 1
         assert data['data']['total_impressions'] == MOCK_ANALYTICS_DATA['impressions']
+        assert data['data']['total_engagements'] == mock_post_analytics.total_engagements
+        assert data['data']['average_engagement_rate'] == MOCK_ANALYTICS_DATA['engagement_rate']
     
     def test_get_analytics_overview_invalid_period(self, client):
-        """Test getting analytics overview with invalid period"""
+        """
+        Test handling of invalid period parameter.
+        
+        This test:
+        1. Makes a request with an invalid period
+        2. Verifies the error response
+        
+        Args:
+            client: Flask test client
+        """
         response = client.get(
             f'/api/analytics/overview/{MOCK_USER_ID}',
             query_string={'period': 'invalid'},
