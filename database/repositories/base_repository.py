@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from sqlalchemy.orm import Session
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
+# from sqlalchemy.ext.declarative import declarative_base
 from typing import Optional, List, Dict, Any, Type, TypeVar
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 import logging

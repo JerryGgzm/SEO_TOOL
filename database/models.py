@@ -2,7 +2,8 @@ from sqlalchemy import (
     Column, String, Integer, Float, Boolean, DateTime, Text, 
     ForeignKey, Index, JSON, LargeBinary, TIMESTAMP
 )
-from sqlalchemy.ext.declarative import declarative_base
+# from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import relationship, Session
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID, JSONB
 from sqlalchemy.sql import func

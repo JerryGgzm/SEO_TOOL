@@ -1,6 +1,7 @@
 """Data access layer""" 
 from sqlalchemy import create_engine, Column, String, DateTime, Boolean, Text, JSON
-from sqlalchemy.ext.declarative import declarative_base
+# from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.exc import IntegrityError
 from cryptography.fernet import Fernet
