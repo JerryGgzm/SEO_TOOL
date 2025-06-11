@@ -803,7 +803,7 @@ class ReviewOptimizationService:
             if not db_draft:
                 return
             
-            # Calculate performance prediction
+            #TODO: Calculate performance prediction
             # This could integrate with analytics module for ML predictions
             prediction_score = 0.7  # Placeholder
             
@@ -818,6 +818,7 @@ class ReviewOptimizationService:
     async def _notify_scheduling_module(self, draft_id: str) -> None:
         """Notify scheduling module of new approved content"""
         try:
+            # TODO
             # This would send event to scheduling module
             # Could use event bus, message queue, or direct API call
             notification_data = {
@@ -974,6 +975,7 @@ class ReviewOptimizationService:
     
     def _analyze_seo_impact(self, original: str, edited: str) -> Dict[str, Any]:
         """Analyze SEO impact of changes"""
+        #TODO
         return {
             'keyword_density_change': 0.0,  # Simplified
             'hashtag_optimization': len([w for w in edited.split() if w.startswith('#')]) > len([w for w in original.split() if w.startswith('#')]),
