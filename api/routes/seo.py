@@ -12,7 +12,7 @@ import logging
 from database import get_data_flow_manager, DataFlowManager
 from modules.twitter_api import TwitterAPIClient
 from modules.user_profile import UserProfileService
-from auth import get_current_user, User
+from api.middleware import get_current_user, User
 
 from modules.seo.service_integration import SEOService, create_enhanced_seo_service
 from modules.seo.models import (

@@ -11,10 +11,10 @@ import logging
 from database import get_data_flow_manager, DataFlowManager
 from modules.content_generation.service import ContentGenerationService
 from modules.analytics.collector import AnalyticsCollector
-from auth import get_current_user, User
+from api.middleware import get_current_user, User
 
-from .service import ReviewOptimizationService
-from .models import (
+from modules.review_optimization.service import ReviewOptimizationService
+from modules.review_optimization.models import (
     ContentDraftReview, ReviewDecisionRequest, BatchReviewRequest,
     ContentRegenerationRequest, StatusUpdateRequest, ReviewHistoryItem,
     ReviewSummary, ReviewAnalytics, RegenerationResult, ReviewQueue,

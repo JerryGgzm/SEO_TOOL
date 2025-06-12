@@ -15,10 +15,9 @@ class ContentQualityChecker:
     def __init__(self):
         # Quality assessment weights
         self.weights = {
-            'engagement_prediction': 0.25,
-            'brand_alignment': 0.20,
-            'trend_relevance': 0.20,
-            'seo_optimization': 0.15,
+            'engagement_prediction': 0.30,
+            'brand_alignment': 0.25,
+            'trend_relevance': 0.25,
             'readability': 0.20
         }
         
@@ -55,7 +54,6 @@ class ContentQualityChecker:
             engagement_score = self._assess_engagement_potential(draft, context)
             brand_alignment_score = self._assess_brand_alignment(draft, context)
             trend_relevance_score = self._assess_trend_relevance(draft, context)
-            seo_score = self._assess_seo_optimization(draft)
             readability_score = self._assess_readability(draft)
             
             # Calculate overall score
@@ -63,7 +61,6 @@ class ContentQualityChecker:
                 engagement_score * self.weights['engagement_prediction'] +
                 brand_alignment_score * self.weights['brand_alignment'] +
                 trend_relevance_score * self.weights['trend_relevance'] +
-                seo_score * self.weights['seo_optimization'] +
                 readability_score * self.weights['readability']
             )
             
@@ -76,7 +73,6 @@ class ContentQualityChecker:
                 engagement_prediction=round(engagement_score, 3),
                 brand_alignment=round(brand_alignment_score, 3),
                 trend_relevance=round(trend_relevance_score, 3),
-                seo_optimization=round(seo_score, 3),
                 readability=round(readability_score, 3),
                 issues=issues,
                 suggestions=suggestions
@@ -89,7 +85,6 @@ class ContentQualityChecker:
                 engagement_prediction=0.5,
                 brand_alignment=0.5,
                 trend_relevance=0.5,
-                seo_optimization=0.5,
                 readability=0.5,
                 issues=["Quality assessment failed"],
                 suggestions=["Manual review recommended"]
@@ -257,47 +252,7 @@ class ContentQualityChecker:
         
         return min(1.0, score)
     
-    def _assess_seo_optimization(self, draft: ContentDraft) -> float:
-        """Assess SEO optimization level"""
-        
-        score = 0.5  # Base score
-        text = draft.generated_text
-        seo_suggestions = draft.seo_suggestions
-        
-        # Hashtag optimization
-        hashtags_in_content = len(re.findall(r'#\w+', text))
-        suggested_hashtags = len(seo_suggestions.hashtags)
-        
-        if suggested_hashtags > 0:
-            hashtag_usage_ratio = hashtags_in_content / suggested_hashtags
-            if 0.3 <= hashtag_usage_ratio <= 1.0:  # Good hashtag usage
-                score += 0.2
-            elif hashtag_usage_ratio > 1.0:  # Too many hashtags
-                score -= 0.1
-        
-        # Keyword inclusion
-        keywords_used = 0
-        text_lower = text.lower()
-        for keyword in seo_suggestions.keywords:
-            if keyword.lower() in text_lower:
-                keywords_used += 1
-        
-        if seo_suggestions.keywords:
-            keyword_ratio = keywords_used / len(seo_suggestions.keywords)
-            score += keyword_ratio * 0.2
-        
-        # Mentions usage
-        mentions_in_content = len(re.findall(r'@\w+', text))
-        if mentions_in_content > 0 and seo_suggestions.mentions:
-            score += 0.1
-        
-        # Length optimization for platform
-        if draft.content_type == ContentType.TWEET:
-            # Twitter optimal length considerations
-            if 100 <= len(text) <= 250:  # Good length for engagement
-                score += 0.1
-        
-        return min(1.0, max(0.0, score))
+
     
     def _assess_readability(self, draft: ContentDraft) -> float:
         """Assess content readability and clarity"""
@@ -420,13 +375,11 @@ class ContentQualityChecker:
         if not re.search(r'\b(you|your)\b', text, re.IGNORECASE):
             suggestions.append('Use "you/your" to make content more personal')
         
-        # SEO suggestions
-        seo_suggestions = draft.seo_suggestions
+        # Hashtag suggestions
         hashtags_in_content = len(re.findall(r'#\w+', text))
         
-        if len(seo_suggestions.hashtags) > hashtags_in_content:
-            missing_hashtags = len(seo_suggestions.hashtags) - hashtags_in_content
-            suggestions.append(f'Consider adding {missing_hashtags} more relevant hashtags')
+        if hashtags_in_content == 0 and draft.content_type == ContentType.TWEET:
+            suggestions.append('Consider adding relevant hashtags for better discoverability')
         
         # Brand voice suggestions
         brand_voice = context.brand_voice

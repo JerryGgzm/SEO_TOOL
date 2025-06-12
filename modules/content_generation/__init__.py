@@ -1,12 +1,11 @@
-"""ContentGenerationModule - AI-Powered Content Generation Engine
+"""ContentGenerationModule - Streamlined Content Generation Engine
 
 This module handles intelligent content generation based on trend analysis:
 1. Context-aware content generation using LLM
 2. Multi-type content support (tweets, replies, threads)
-3. SEO optimization integration  
-4. Brand voice and style consistency
-5. Quality assessment and filtering
-6. Database integration for draft storage
+3. Brand voice and style consistency
+4. Quality assessment and filtering
+5. Database integration for draft storage
 
 Main Components:
 - generator.py: Main content generation orchestrator
@@ -19,9 +18,11 @@ Main Components:
 Data Flow Integration:
 - Receives analyzed trends from TrendAnalysisModule
 - Gets user context from UserProfileModule  
-- Integrates with SEOModule for optimization
-- Stores drafts via DataFlowManager
+- Stores drafts via database adapter
 - Feeds ReviewOptimizationModule
+
+Note: SEO optimization is handled by the dedicated SEO module.
+This module focuses purely on content generation and quality assessment.
 """
 
 from .models import (
@@ -30,7 +31,6 @@ from .models import (
     ContentGenerationRequest,
     ContentGenerationContext,
     ContentQualityScore,
-    SEOSuggestions,
     BrandVoice
 )
 
@@ -49,7 +49,6 @@ __all__ = [
     'ContentGenerationRequest',
     'ContentGenerationContext',
     'ContentQualityScore',
-    'SEOSuggestions',
     'BrandVoice',
     
     # Core components
@@ -68,3 +67,25 @@ __all__ = [
     'ContentGenerationService',
     'ContentGenerationDatabaseAdapter'
 ]
+
+# Version info
+__version__ = "2.0.0"
+
+# Module configuration
+DEFAULT_CONFIG = {
+    'quality_threshold': 0.6,
+    'max_drafts_per_request': 10,
+    'content_length_limits': {
+        'tweet': 280,
+        'reply': 280,
+        'thread': 280,
+        'quote_tweet': 280
+    },
+    'generation_timeout_seconds': 30
+}
+
+# Module initialization
+import logging
+logger = logging.getLogger(__name__)
+logger.info(f"Content Generation Module v{__version__} initialized")
+logger.info("Module focus: Pure content generation without SEO optimization")

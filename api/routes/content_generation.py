@@ -1,21 +1,24 @@
 """Content Generation API Routes
 
 This module implements the FastAPI routes for the content generation system,
-handling AI-powered content creation, optimization, and management workflows.
+handling AI-powered content creation and management workflows.
+
+Note: SEO optimization is handled separately by the SEO module.
 """
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Path, status
 from fastapi.responses import JSONResponse
+from datetime import datetime
 import logging
 
 from database import get_data_flow_manager, DataFlowManager
-from modules.seo.service_integration import SEOService
-from auth import get_current_user, User
+from api.middleware import get_current_user, User
 
 from modules.content_generation.service import ContentGenerationService
+from modules.content_generation.database_adapter import ContentGenerationDatabaseAdapter
 from modules.content_generation.models import (
     ContentGenerationRequest, ContentType, GenerationMode,
-    ContentDraft, BrandVoice, SEOSuggestions
+    ContentDraft, BrandVoice
 )
 
 logger = logging.getLogger(__name__)
@@ -30,23 +33,12 @@ async def get_content_service(
 ) -> ContentGenerationService:
     """Get content generation service with dependencies"""
     try:
-        # Initialize SEO service (if available)
-        seo_service = None
-        try:
-            # This would be properly injected in a real application
-            seo_service = SEOService(
-                twitter_client=None,  # Would be injected
-                user_service=None,    # Would be injected
-                data_flow_manager=data_flow_manager,
-                llm_client=None       # Would come from config
-            )
-        except Exception as e:
-            logger.warning(f"SEO service not available: {e}")
+        # Create database adapter
+        db_adapter = ContentGenerationDatabaseAdapter(data_flow_manager)
         
         return ContentGenerationService(
-            data_flow_manager=data_flow_manager,
-            seo_service=seo_service,
-            llm_config={'provider': 'openai'}  # Would come from config
+            llm_config={'provider': 'openai'},  # Would come from config
+            database_adapter=db_adapter
         )
     except Exception as e:
         logger.error(f"Failed to create content service: {e}")
@@ -57,30 +49,38 @@ async def get_content_service(
 
 @router.post("/generate", response_model=List[str])
 async def generate_content(
-    request: ContentGenerationRequest,
+    founder_id: str = Query(..., description="Founder ID"),
+    content_type: ContentType = Query(default=ContentType.TWEET),
+    generation_mode: GenerationMode = Query(default=GenerationMode.STANDARD),
+    trend_id: Optional[str] = Query(None, description="Specific trend to base content on"),
+    quantity: int = Query(default=1, ge=1, le=10, description="Number of variations"),
     current_user: User = Depends(get_current_user),
     service: ContentGenerationService = Depends(get_content_service)
 ):
     """
     Generate AI-powered content based on trends and user context
     
-    Creates content drafts using LLM and SEO optimization based on:
+    Creates content drafts using LLM based on:
     - User's product information and brand voice
     - Current trending topics
-    - SEO best practices
     - Content type specifications
+    - Generation mode preferences
     """
     try:
         # Validate user access
-        if current_user.id != request.founder_id and not current_user.is_admin:
+        if current_user.id != founder_id and not current_user.is_admin:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied"
             )
         
         # Generate content
-        draft_ids = await service.generate_content_for_founder(
-            request.founder_id, request
+        draft_ids = await service.generate_content(
+            founder_id=founder_id,
+            trend_id=trend_id,
+            content_type=content_type,
+            generation_mode=generation_mode,
+            quantity=quantity
         )
         
         if not draft_ids:
@@ -89,7 +89,7 @@ async def generate_content(
                 detail="Failed to generate content. Check your request parameters."
             )
         
-        logger.info(f"Generated {len(draft_ids)} content drafts for user {request.founder_id}")
+        logger.info(f"Generated {len(draft_ids)} content drafts for user {founder_id}")
         
         return JSONResponse(
             status_code=status.HTTP_201_CREATED,
@@ -97,7 +97,9 @@ async def generate_content(
                 "message": "Content generated successfully",
                 "draft_ids": draft_ids,
                 "count": len(draft_ids),
-                "founder_id": request.founder_id
+                "founder_id": founder_id,
+                "content_type": content_type.value,
+                "generation_mode": generation_mode.value
             }
         )
         
@@ -110,24 +112,23 @@ async def generate_content(
             detail="Content generation failed"
         )
 
-@router.post("/generate/seo-optimized")
-async def generate_seo_optimized_content(
+@router.post("/generate/viral-focused")
+async def generate_viral_content(
     founder_id: str = Query(..., description="Founder ID"),
     content_type: ContentType = Query(default=ContentType.TWEET),
     trend_id: Optional[str] = Query(None, description="Specific trend to base content on"),
-    optimization_level: str = Query(default="moderate", description="SEO optimization level"),
     quantity: int = Query(default=3, ge=1, le=10, description="Number of variations"),
     current_user: User = Depends(get_current_user),
     service: ContentGenerationService = Depends(get_content_service)
 ):
     """
-    Generate SEO-optimized content with specific optimization level
+    Generate viral-focused content optimized for maximum engagement
     
-    Uses advanced SEO optimization strategies including:
-    - Keyword research and integration
-    - Hashtag optimization
-    - Trending topic alignment
+    Uses strategies focused on:
+    - Viral content patterns
     - Engagement optimization
+    - Trending topic alignment
+    - Shareable content elements
     """
     try:
         # Validate user access
@@ -137,22 +138,21 @@ async def generate_seo_optimized_content(
                 detail="Access denied"
             )
         
-        # Generate SEO-optimized content
-        draft_ids = await service.generate_seo_optimized_content(
+        # Generate viral-focused content
+        draft_ids = await service.generate_viral_focused_content(
             founder_id=founder_id,
             trend_id=trend_id,
             content_type=content_type,
-            optimization_level=optimization_level,
             quantity=quantity
         )
         
         return JSONResponse(
             status_code=status.HTTP_201_CREATED,
             content={
-                "message": "SEO-optimized content generated successfully",
+                "message": "Viral-focused content generated successfully",
                 "draft_ids": draft_ids,
                 "count": len(draft_ids),
-                "optimization_level": optimization_level,
+                "generation_mode": "viral_focused",
                 "content_type": content_type.value
             }
         )
@@ -160,26 +160,30 @@ async def generate_seo_optimized_content(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"SEO-optimized content generation failed: {e}")
+        logger.error(f"Viral-focused content generation failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="SEO-optimized content generation failed"
+            detail="Viral-focused content generation failed"
         )
 
-@router.post("/generate/custom")
-async def generate_custom_content(
+@router.post("/generate/brand-focused")
+async def generate_brand_focused_content(
     founder_id: str = Query(..., description="Founder ID"),
-    content_type: ContentType = Query(..., description="Content type"),
-    custom_keywords: List[str] = Query(..., description="Custom keywords"),
-    custom_hashtags: List[str] = Query(..., description="Custom hashtags"),
+    content_type: ContentType = Query(default=ContentType.TWEET),
+    tone: Optional[str] = Query(None, description="Brand tone override"),
+    style: Optional[str] = Query(None, description="Writing style override"),
     quantity: int = Query(default=2, ge=1, le=5, description="Number of variations"),
     current_user: User = Depends(get_current_user),
     service: ContentGenerationService = Depends(get_content_service)
 ):
     """
-    Generate content with custom SEO parameters
+    Generate brand-focused content with strong brand alignment
     
-    Allows users to specify exact keywords and hashtags for targeted content creation.
+    Focuses on:
+    - Brand voice consistency
+    - Brand messaging alignment
+    - Professional tone
+    - Brand value communication
     """
     try:
         # Validate user access
@@ -189,39 +193,41 @@ async def generate_custom_content(
                 detail="Access denied"
             )
         
-        # Validate input
-        if not custom_keywords and not custom_hashtags:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="At least one keyword or hashtag must be provided"
+        # Create custom brand voice if overrides provided
+        custom_brand_voice = None
+        if tone or style:
+            custom_brand_voice = BrandVoice(
+                tone=tone or "professional",
+                style=style or "informative"
             )
         
-        # Generate custom content
-        draft_ids = await service.generate_content_with_custom_seo(
+        # Generate brand-focused content
+        draft_ids = await service.generate_brand_focused_content(
             founder_id=founder_id,
+            custom_brand_voice=custom_brand_voice,
             content_type=content_type,
-            custom_keywords=custom_keywords,
-            custom_hashtags=custom_hashtags,
             quantity=quantity
         )
         
         return JSONResponse(
             status_code=status.HTTP_201_CREATED,
             content={
-                "message": "Custom content generated successfully",
+                "message": "Brand-focused content generated successfully",
                 "draft_ids": draft_ids,
-                "custom_keywords": custom_keywords,
-                "custom_hashtags": custom_hashtags
+                "brand_overrides": {
+                    "tone": tone,
+                    "style": style
+                } if (tone or style) else None
             }
         )
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Custom content generation failed: {e}")
+        logger.error(f"Brand-focused content generation failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Custom content generation failed"
+            detail="Brand-focused content generation failed"
         )
 
 @router.get("/drafts/{draft_id}")
@@ -233,21 +239,21 @@ async def get_draft(
     """
     Get content draft by ID
     
-    Returns the full content draft including generation metadata,
-    quality scores, and SEO suggestions.
+    Returns the full content draft including generation metadata
+    and quality scores.
     """
     try:
-        # Get draft from database
-        draft_data = service.data_flow_manager.content_repo.get_by_id(draft_id)
+        # Get draft from service
+        draft = await service.get_draft(draft_id)
         
-        if not draft_data:
+        if not draft:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Draft not found"
             )
         
         # Check user access
-        if current_user.id != draft_data.founder_id and not current_user.is_admin:
+        if current_user.id != draft.founder_id and not current_user.is_admin:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied"
@@ -256,14 +262,12 @@ async def get_draft(
         # Convert to response format
         return {
             "draft_id": draft_id,
-            "content": draft_data.generated_text,
-            "content_type": draft_data.content_type,
-            "founder_id": draft_data.founder_id,
-            "quality_score": draft_data.ai_generation_metadata.get('quality_score', 0),
-            "seo_suggestions": draft_data.seo_suggestions,
-            "generation_metadata": draft_data.ai_generation_metadata,
-            "created_at": draft_data.created_at.isoformat(),
-            "status": getattr(draft_data, 'status', 'draft')
+            "content": draft.generated_text,
+            "content_type": draft.content_type.value,
+            "founder_id": draft.founder_id,
+            "quality_score": draft.quality_score,
+            "generation_metadata": draft.generation_metadata,
+            "created_at": draft.created_at.isoformat()
         }
         
     except HTTPException:
@@ -275,69 +279,17 @@ async def get_draft(
             detail="Failed to retrieve draft"
         )
 
-@router.post("/regenerate/{draft_id}")
-async def regenerate_content(
-    draft_id: str = Path(..., description="Draft ID"),
-    feedback: str = Query(..., description="Feedback for regeneration"),
-    seo_improvements: Optional[Dict[str, Any]] = None,
-    current_user: User = Depends(get_current_user),
-    service: ContentGenerationService = Depends(get_content_service)
-):
-    """
-    Regenerate content based on feedback
-    
-    Creates new content based on the original draft and user feedback,
-    with optional SEO improvements.
-    """
-    try:
-        # Regenerate content
-        new_draft_id = await service.regenerate_content_with_seo_feedback(
-            draft_id=draft_id,
-            founder_id=current_user.id,
-            feedback=feedback,
-            seo_improvements=seo_improvements
-        )
-        
-        if not new_draft_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to regenerate content"
-            )
-        
-        return JSONResponse(
-            status_code=status.HTTP_201_CREATED,
-            content={
-                "message": "Content regenerated successfully",
-                "original_draft_id": draft_id,
-                "new_draft_id": new_draft_id,
-                "feedback_applied": feedback
-            }
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Content regeneration failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Content regeneration failed"
-        )
-
-@router.get("/analytics/{founder_id}")
-async def get_content_analytics(
+@router.get("/drafts/founder/{founder_id}")
+async def get_founder_drafts(
     founder_id: str = Path(..., description="Founder ID"),
-    days: int = Query(default=30, ge=1, le=90, description="Analysis period in days"),
+    limit: int = Query(default=20, ge=1, le=100, description="Maximum number of drafts"),
     current_user: User = Depends(get_current_user),
     service: ContentGenerationService = Depends(get_content_service)
 ):
     """
-    Get content generation analytics
+    Get recent drafts for a founder
     
-    Returns comprehensive analytics including:
-    - Generation statistics
-    - Quality metrics
-    - SEO performance
-    - Approval rates
+    Returns list of recent content drafts with basic information.
     """
     try:
         # Validate user access
@@ -347,23 +299,87 @@ async def get_content_analytics(
                 detail="Access denied"
             )
         
-        # Get analytics
-        analytics = service.get_seo_content_analytics(founder_id, days)
+        # Get drafts
+        drafts = await service.get_drafts_by_founder(founder_id, limit)
+        
+        # Convert to response format
+        draft_list = []
+        for draft in drafts:
+            draft_list.append({
+                "draft_id": draft.id,
+                "content": draft.generated_text[:100] + "..." if len(draft.generated_text) > 100 else draft.generated_text,
+                "content_type": draft.content_type.value,
+                "quality_score": draft.quality_score,
+                "created_at": draft.created_at.isoformat()
+            })
         
         return {
             "founder_id": founder_id,
-            "period_days": days,
-            "analytics": analytics,
-            "generated_at": datetime.utcnow().isoformat()
+            "drafts": draft_list,
+            "count": len(draft_list),
+            "limit": limit
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Content analytics retrieval failed: {e}")
+        logger.error(f"Failed to get founder drafts: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve content analytics"
+            detail="Failed to retrieve drafts"
+        )
+
+@router.put("/drafts/{draft_id}/quality-score")
+async def update_draft_quality_score(
+    draft_id: str = Path(..., description="Draft ID"),
+    quality_score: float = Query(..., ge=0, le=1, description="Quality score"),
+    current_user: User = Depends(get_current_user),
+    service: ContentGenerationService = Depends(get_content_service)
+):
+    """
+    Update quality score for a draft
+    
+    Allows manual quality score updates based on performance feedback.
+    """
+    try:
+        # Get draft first to check ownership
+        draft = await service.get_draft(draft_id)
+        
+        if not draft:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Draft not found"
+            )
+        
+        # Check user access
+        if current_user.id != draft.founder_id and not current_user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+        
+        # Update quality score
+        success = await service.update_draft_quality_score(draft_id, quality_score)
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to update quality score"
+            )
+        
+        return {
+            "message": "Quality score updated successfully",
+            "draft_id": draft_id,
+            "new_quality_score": quality_score
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update quality score: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update quality score"
         )
 
 @router.get("/templates/{content_type}")
@@ -407,6 +423,18 @@ async def get_content_templates(
                     "description": "Template for narrative content",
                     "variables": ["story_topic", "key_points", "lesson"]
                 }
+            ],
+            ContentType.REPLY: [
+                {
+                    "name": "Supportive Reply",
+                    "description": "Template for supportive responses",
+                    "variables": ["agreement_point", "additional_insight"]
+                },
+                {
+                    "name": "Question Reply",
+                    "description": "Template for asking follow-up questions",
+                    "variables": ["question", "context"]
+                }
             ]
         }
         
@@ -429,8 +457,7 @@ async def get_content_ideas(
     trend_id: Optional[str] = Query(None, description="Specific trend ID"),
     content_type: ContentType = Query(default=ContentType.TWEET),
     count: int = Query(default=5, ge=1, le=20, description="Number of ideas"),
-    current_user: User = Depends(get_current_user),
-    service: ContentGenerationService = Depends(get_content_service)
+    current_user: User = Depends(get_current_user)
 ):
     """
     Get AI-generated content ideas based on trends and user profile
@@ -446,15 +473,23 @@ async def get_content_ideas(
             )
         
         # Get content ideas (this would use your content generation service)
+        # For now, returning mock data - implement with actual AI generation
         ideas = []
+        idea_templates = [
+            "Share your experience with {topic}",
+            "What's the biggest challenge in {industry}?",
+            "Here's why {trend} matters for {audience}",
+            "The future of {industry} in 3 key points",
+            "Common mistakes in {field} and how to avoid them"
+        ]
+        
         for i in range(count):
             ideas.append({
                 "id": f"idea_{i+1}",
                 "title": f"Content idea {i+1}",
-                "description": "AI-generated content idea based on current trends",
-                "suggested_keywords": ["innovation", "technology", "growth"],
-                "suggested_hashtags": ["#innovation", "#tech", "#startup"],
-                "estimated_engagement": "high"
+                "description": idea_templates[i % len(idea_templates)],
+                "content_type": content_type.value,
+                "estimated_engagement": ["low", "medium", "high"][i % 3]
             })
         
         return {
@@ -473,3 +508,12 @@ async def get_content_ideas(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to generate content ideas"
         )
+
+@router.get("/health")
+async def health_check():
+    """Health check endpoint for content generation service"""
+    return {
+        "status": "healthy",
+        "service": "content-generation",
+        "timestamp": datetime.utcnow().isoformat()
+    }

@@ -49,6 +49,7 @@ Requirements:
 - Include a call-to-action or thought-provoking question
 - Match the brand voice
 - Make it shareable and engaging
+- Focus on authentic value delivery
 
 Generate a tweet that connects the trend to your product's value proposition while maintaining authenticity.""",
 
@@ -75,6 +76,7 @@ Requirements:
 - Include emotional appeal
 - End with clear call-to-action
 - Avoid sounding too promotional
+- Focus on user benefits over features
 
 Generate a tweet that naturally showcases your product's benefits.""",
 
@@ -97,8 +99,59 @@ Requirements:
 - Position brand as helpful expert
 - Include relevant emoji for engagement
 - End with question to encourage replies
+- Make content easily shareable
 
-Generate an educational tweet that establishes thought leadership."""
+Generate an educational tweet that establishes thought leadership.""",
+
+            "viral_focused": """Create a viral-focused tweet designed for maximum engagement about {trend_name}.
+
+Viral Elements to Include:
+- Controversial but respectful take
+- Universal truth or insight
+- Emotional hook (surprise, humor, inspiration)
+- Conversational tone
+- Question or discussion starter
+
+Context:
+- Product: {product_name}
+- Target Audience: {target_audience}
+- Brand Voice: {brand_tone}
+- Trending Topic: {trend_name}
+
+Requirements:
+- Maximum 280 characters
+- Strong emotional hook in first line
+- Include relatable experience
+- End with engaging question
+- Avoid being overly promotional
+- Focus on shareability and discussion
+
+Generate a tweet optimized for viral engagement while maintaining brand authenticity.""",
+
+            "engagement_optimized": """Create an engagement-optimized tweet about {trend_name}.
+
+Engagement Drivers:
+- Ask compelling questions
+- Share personal insights
+- Create discussion starters
+- Use conversational language
+- Include call-to-action for responses
+
+Brand Context:
+- Product: {product_name}
+- Voice: {brand_tone}
+- Audience: {target_audience}
+- Expertise: {expertise_area}
+
+Requirements:
+- Maximum 280 characters
+- Start with hook or question
+- Share genuine insight
+- Encourage replies and discussion
+- Use authentic, conversational tone
+- Make audience feel heard
+
+Generate a tweet designed to maximize meaningful engagement."""
         },
         
         ContentType.REPLY: {
@@ -243,15 +296,22 @@ class PromptEngine:
         """Determine the best template based on context and request"""
         
         # Check generation mode first
-        if request.generation_mode == GenerationMode.SEO_OPTIMIZED:
+        if request.generation_mode == GenerationMode.VIRAL_FOCUSED:
             if content_type == ContentType.TWEET:
-                return "trend_based" if context.trend_info else "product_focused"
-        elif request.generation_mode == GenerationMode.VIRAL_FOCUSED:
-            return "educational" if content_type == ContentType.TWEET else "supportive"
+                return "viral_focused"
+            else:
+                return "supportive"
+        elif request.generation_mode == GenerationMode.ENGAGEMENT_OPTIMIZED:
+            if content_type == ContentType.TWEET:
+                return "engagement_optimized"
+            else:
+                return "expert_insight"
+        elif request.generation_mode == GenerationMode.BRAND_FOCUSED:
+            return "product_focused" if content_type == ContentType.TWEET else "supportive"
         elif request.generation_mode == GenerationMode.TREND_BASED:
             return "trend_based" if context.trend_info else "educational"
         
-        # Original logic for backward compatibility
+        # Default template selection
         if content_type == ContentType.TWEET:
             # If we have trend info, use trend-based template
             if context.trend_info:
@@ -288,7 +348,6 @@ class PromptEngine:
         trend_info = context.trend_info or {}
         brand_voice = context.brand_voice
         
-        print("context.content_preferences", context.content_preferences)
         # Prepare replacement dictionary
         replacements = {
             # Product information
@@ -367,7 +426,8 @@ Requirements:
 - Maximum 280 characters
 - Include call-to-action
 - Match brand voice
-- Be authentic and engaging""",
+- Be authentic and engaging
+- Focus on user value""",
 
             ContentType.REPLY: """Create a helpful reply that adds value to the conversation.
 
