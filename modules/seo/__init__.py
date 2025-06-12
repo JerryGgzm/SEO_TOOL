@@ -54,7 +54,7 @@ __version__ = "2.0.0"
 
 # Default configuration
 DEFAULT_SEO_CONFIG = {
-    'llm_optimization_mode': 'hybrid',
+    'llm_optimization_mode': 'comprehensive',
     'optimization_level': 'moderate',
     'hashtag_strategy': 'engagement_optimized',
     'max_hashtags_per_tweet': 5,
@@ -62,7 +62,9 @@ DEFAULT_SEO_CONFIG = {
     'max_hashtags_per_reply': 2,
     'cache_duration_hours': 6,
     'llm_enabled': True,
-    'fallback_to_traditional': True
+    'enable_fallback_protection': True,
+    'llm_enhancement_threshold': 0.3,
+    'default_optimization_mode': 'comprehensive'
 }
 
 # Module initialization

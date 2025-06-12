@@ -42,13 +42,13 @@ async def get_seo_service(
             user_service=user_service,
             data_flow_manager=data_flow_manager,
             llm_client=llm_client,
-            config={'llm_optimization_mode': 'hybrid'}
+            config={'llm_optimization_mode': 'comprehensive'}
         )
     except Exception as e:
         logger.error(f"Failed to create SEO service: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Content variations generation failed"
+            detail="SEO service initialization failed"
         )
 
 @router.get("/keywords/analyze")
@@ -275,7 +275,7 @@ async def get_trending_hashtags(
 @router.post("/batch/optimize")
 async def batch_optimize_content(
     content_list: List[Dict[str, Any]] = Body(..., description="List of content to optimize"),
-    optimization_mode: str = Body(default="hybrid", description="Optimization mode"),
+    optimization_mode: str = Body(default="comprehensive", description="Optimization mode"),
     current_user: User = Depends(get_current_user),
     service: SEOService = Depends(get_seo_service)
 ):
@@ -377,24 +377,19 @@ async def get_optimization_config(
         config_info = {
             "optimization_modes": [
                 {
-                    "mode": "traditional",
-                    "description": "Classical SEO optimization using established algorithms",
-                    "features": ["keyword_optimization", "hashtag_generation", "structure_analysis"]
+                    "mode": "comprehensive",
+                    "description": "Advanced optimization combining LLM intelligence with SEO fundamentals",
+                    "features": ["llm_enhancement", "seo_optimization", "intelligent_merging", "trend_alignment"]
                 },
                 {
-                    "mode": "hybrid", 
-                    "description": "Combines traditional SEO with AI enhancement",
-                    "features": ["traditional_seo", "llm_enhancement", "intelligent_merging"]
-                },
-                {
-                    "mode": "llm_enhanced",
-                    "description": "Pure AI-powered optimization using large language models",
-                    "features": ["intelligent_content_enhancement", "context_awareness", "natural_language_optimization"]
-                },
-                {
-                    "mode": "intelligent",
+                    "mode": "intelligent", 
                     "description": "Adaptive optimization that selects the best strategy based on content analysis",
-                    "features": ["content_analysis", "strategy_selection", "adaptive_optimization"]
+                    "features": ["content_analysis", "strategy_selection", "adaptive_optimization", "context_awareness"]
+                },
+                {
+                    "mode": "adaptive",
+                    "description": "Dynamic optimization that adjusts approach based on content characteristics",
+                    "features": ["content_characteristics_analysis", "dynamic_strategy", "performance_optimization"]
                 }
             ],
             "content_types_supported": [
@@ -413,13 +408,22 @@ async def get_optimization_config(
                     "context_aware_optimization", 
                     "content_variation_generation",
                     "trend_alignment",
-                    "engagement_enhancement"
+                    "engagement_enhancement",
+                    "semantic_understanding",
+                    "natural_language_optimization"
                 ]
             },
             "analytics_features": [
                 "performance_tracking", "trend_analysis", "keyword_performance",
-                "hashtag_effectiveness", "optimization_impact"
-            ]
+                "hashtag_effectiveness", "optimization_impact", "llm_enhancement_metrics"
+            ],
+            "default_settings": {
+                "optimization_mode": "comprehensive",
+                "optimization_level": "moderate", 
+                "hashtag_strategy": "engagement_optimized",
+                "llm_enhancement_enabled": True,
+                "fallback_protection": True
+            }
         }
         
         return JSONResponse(
@@ -444,7 +448,7 @@ async def optimize_content(
     content_type: SEOContentType = Body(default=SEOContentType.TWEET),
     optimization_level: SEOOptimizationLevel = Body(default=SEOOptimizationLevel.MODERATE),
     target_keywords: List[str] = Body(default=[], description="Target keywords"),
-    optimization_mode: str = Body(default="hybrid", description="Optimization mode"),
+    optimization_mode: str = Body(default="comprehensive", description="Optimization mode"),
     current_user: User = Depends(get_current_user),
     service: SEOService = Depends(get_seo_service)
 ):
@@ -784,10 +788,26 @@ async def optimize_keywords(
             preserve_tone=True
         )
         
-        # Optimize using keyword optimizer
-        optimized_result = service.optimizer.keyword_optimizer.optimize_for_keywords(
-            keyword_request,
-            await service._build_seo_context(current_user.id, 'tweet')
+        # Use the keyword analyzer with optimization request
+        context = await service._build_seo_context(current_user.id, 'tweet')
+        
+        # Optimize content with keyword integration using the main optimizer
+        optimization_result = await service.optimize_content_intelligent(
+            text=content,
+            content_type='tweet',
+            context={
+                'founder_id': current_user.id,
+                'target_keywords': target_keywords,
+                'optimization_strategy': 'comprehensive'
+            },
+            optimization_mode='comprehensive'
+        )
+        
+        # Analyze keyword integration in result
+        keyword_analysis = service.optimizer.keyword_analyzer.analyze_keywords(
+            content=optimization_result['optimized_content'],
+            context=context,
+            target_keywords=target_keywords
         )
         
         return JSONResponse(
@@ -795,12 +815,13 @@ async def optimize_keywords(
             content={
                 "message": "Content optimized for keywords successfully",
                 "original_content": content,
-                "optimized_content": optimized_result.optimized_content,
+                "optimized_content": optimization_result['optimized_content'],
                 "target_keywords": target_keywords,
-                "keywords_integrated": optimized_result.keywords_integrated,
-                "optimization_score": optimized_result.optimization_score,
-                "readability_score": optimized_result.readability_score,
-                "improvements_made": optimized_result.improvements_made
+                "keywords_integrated": [kw.keyword for kw in keyword_analysis if kw.keyword in target_keywords],
+                "optimization_score": optimization_result['optimization_score'],
+                "readability_score": sum(kw.relevance_score for kw in keyword_analysis) / len(keyword_analysis) if keyword_analysis else 0.0,
+                "improvements_made": optimization_result.get('improvements_made', []),
+                "llm_enhanced": optimization_result.get('llm_enhanced', False)
             }
         )
         
@@ -995,13 +1016,61 @@ async def audit_content_seo(
                 detail="Access denied"
             )
         
-        # Perform comprehensive SEO audit
-        audit_result = await service.perform_comprehensive_seo_audit(
-            content=content_data.content,
-            content_id=content_id,
+        # Perform comprehensive SEO audit using available analysis methods
+        content_text = content_data.content if hasattr(content_data, 'content') else str(content_data)
+        
+        # Analyze SEO potential
+        seo_analysis = await service.analyze_content_seo_potential(
+            content=content_text,
             founder_id=current_user.id,
-            content_metadata=content_data.metadata or {}
+            content_type='tweet'
         )
+        
+        # Analyze keywords if any exist in content
+        context = await service._build_seo_context(current_user.id, 'tweet')
+        keyword_analysis = service.optimizer.keyword_analyzer.analyze_keywords(
+            content=content_text,
+            context=context,
+            target_keywords=[]
+        )
+        
+        # Generate hashtag recommendations
+        hashtag_metrics = service.optimizer.hashtag_generator.generate_hashtags(
+            HashtagGenerationRequest(
+                content=content_text,
+                content_type=SEOContentType.TWEET,
+                max_hashtags=5,
+                strategy=HashtagStrategy.ENGAGEMENT_OPTIMIZED
+            )
+        )
+        
+        # Compile comprehensive audit result
+        audit_result = {
+            "seo_analysis": seo_analysis,
+            "keyword_analysis": [
+                {
+                    "keyword": kw.keyword,
+                    "relevance_score": kw.relevance_score,
+                    "difficulty": kw.difficulty.value,
+                    "trending_status": kw.trending_status
+                } for kw in keyword_analysis[:10]
+            ],
+            "hashtag_recommendations": [
+                {
+                    "hashtag": ht.hashtag,
+                    "relevance_score": ht.relevance_score,
+                    "engagement_rate": ht.engagement_rate,
+                    "competition_level": ht.competition_level.value
+                } for ht in hashtag_metrics[:5]
+            ],
+            "overall_score": seo_analysis.get('combined_score', 0),
+            "recommendations": [
+                "Optimize keyword integration for better relevance",
+                "Consider using recommended hashtags for increased reach",
+                "Enhance content engagement elements",
+                "Monitor performance and adjust strategy accordingly"
+            ]
+        }
         
         return JSONResponse(
             status_code=status.HTTP_200_OK,

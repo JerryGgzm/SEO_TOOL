@@ -15,12 +15,19 @@ from modules.twitter_api import TwitterAPIClient
 from modules.user_profile import UserProfileService
 from database import DataFlowManager
 
-# Import the enhanced optimizer
-from modules.seo.optimizer import SEOOptimizer, create_enhanced_seo_optimizer
-from modules.seo.models import (
-    SEOOptimizationRequest, SEOAnalysisContext, SEOContentType,
-    SEOOptimizationLevel, HashtagStrategy, ContentOptimizationSuggestions
-)
+try:
+    from .optimizer import create_enhanced_seo_optimizer
+    from .models import (
+        SEOOptimizationRequest, SEOAnalysisContext, SEOContentType,
+        SEOOptimizationLevel, HashtagStrategy, ContentOptimizationSuggestions
+    )
+except ImportError:
+    # Fallback for direct execution
+    from optimizer import create_enhanced_seo_optimizer
+    from models import (
+        SEOOptimizationRequest, SEOAnalysisContext, SEOContentType,
+        SEOOptimizationLevel, HashtagStrategy, ContentOptimizationSuggestions
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -39,22 +46,35 @@ class SEOService:
         self.user_service = user_service
         self.data_flow_manager = data_flow_manager
         self.llm_client = llm_client
-        self.config = config or {}
+        self.llm_enabled = llm_client is not None
         
-        # Initialize enhanced SEO optimizer with LLM
+        # Enhanced configuration with new options
+        self.config = {
+            'default_optimization_mode': 'comprehensive',  # Updated from 'intelligent'
+            'max_hashtags': 5,
+            'hashtag_strategy': 'engagement_optimized',
+            'use_trending_hashtags': True,
+            'cache_duration_hours': 6,
+            'llm_optimization_mode': 'comprehensive',  # Updated from 'intelligent'
+            'enable_fallback_protection': True,  # Updated from 'fallback_to_traditional'
+            'llm_enhancement_threshold': 0.3
+        }
+        
+        if config:
+            self.config.update(config)
+        
+        # Initialize optimizer with LLM client
         self.optimizer = create_enhanced_seo_optimizer(
             twitter_client=twitter_client,
-            config=config,
+            config=self.config,
             llm_client=llm_client
         )
+        
+        logger.info(f"SEO Service initialized (LLM enabled: {self.llm_enabled})")
         
         # Cache for optimization results
         self._optimization_cache = {}
         self._cache_duration = timedelta(hours=self.config.get('cache_duration_hours', 6))
-        
-        # LLM configuration
-        self.llm_enabled = llm_client is not None
-        self.default_optimization_mode = config.get('default_optimization_mode', 'hybrid') if config else 'hybrid'
     
     async def get_content_suggestions(self, trend_info: Dict[str, Any],
                                     product_info: Dict[str, Any],
@@ -142,87 +162,46 @@ class SEOService:
                                          context: Dict[str, Any] = None,
                                          optimization_mode: str = None) -> Dict[str, Any]:
         """
-        Intelligent content optimization using LLM-enhanced SEO
+        Intelligent content optimization using comprehensive LLM-enhanced approach
         
         Args:
             text: Content to optimize
-            content_type: Type of content
-            context: Additional context for optimization
-            optimization_mode: Specific optimization mode ('traditional', 'llm_enhanced', 'hybrid', 'intelligent')
+            content_type: Type of content ('tweet', 'linkedin_post', etc.)
+            context: Additional context (founder_id, keywords, etc.)
+            optimization_mode: Optimization mode ('comprehensive', 'intelligent', 'adaptive')
             
         Returns:
-            Comprehensive optimization result with LLM insights
+            Dictionary with optimization results
         """
         try:
-            # Convert content type
-            seo_content_type = self._convert_content_type(content_type)
+            # Default to comprehensive mode if not specified
+            if not optimization_mode:
+                optimization_mode = self.config.get('default_optimization_mode', 'comprehensive')
             
-            # Build SEO context
-            seo_context = await self._build_enhanced_seo_context(context, seo_content_type)
-            
-            # Create optimization request
-            request = SEOOptimizationRequest(
-                content=text,
-                content_type=seo_content_type,
-                optimization_level=SEOOptimizationLevel.MODERATE,
-                target_keywords=context.get('target_keywords', []) if context else [],
-                include_hashtags=True,
-                include_trending_tags=True
+            # Use the optimizer's intelligent optimization method
+            result = await self.optimizer.optimize_content_intelligent(
+                text=text,
+                content_type=content_type,
+                context=context,
+                optimization_mode=optimization_mode
             )
             
-            # Set optimization mode preference
-            if optimization_mode and hasattr(request, 'optimization_mode_preference'):
-                request.optimization_mode_preference = optimization_mode
-            elif optimization_mode:
-                # Store in config temporarily
-                self.optimizer.llm_config['llm_optimization_mode'] = optimization_mode
+            # Store optimization result if founder_id provided
+            if context and 'founder_id' in context:
+                await self._store_founder_optimization_result(context['founder_id'], result)
             
-            # Perform enhanced optimization - use the correct method based on mode
-            if optimization_mode in ['hybrid', 'llm_enhanced', 'intelligent'] and hasattr(self.optimizer, 'optimize_content_async'):
-                result = await self.optimizer.optimize_content_async(request, seo_context)
-            else:
-                # Use synchronous method for traditional optimization
-                result = self.optimizer.optimize_content(request, seo_context)
-            
-            # Convert result to service format
-            return {
-                'original_content': result.original_content,
-                'optimized_content': result.optimized_content,
-                'optimization_score': result.optimization_score,
-                'improvements_made': result.improvements_made or [],
-                'hashtag_suggestions': [ht.hashtag for ht in result.hashtag_analysis] if result.hashtag_analysis else [],
-                'keyword_suggestions': [kw.keyword for kw in result.keyword_analysis] if result.keyword_analysis else [],
-                'estimated_reach_improvement': result.estimated_reach_improvement,
-                'llm_enhanced': result.optimization_metadata.get('llm_enhanced', False) if hasattr(result, 'optimization_metadata') and result.optimization_metadata else False,
-                'optimization_mode': optimization_mode or 'traditional',
-                'suggestions': result.suggestions if hasattr(result, 'suggestions') else [],
-                'metadata': {
-                    'optimization_timestamp': datetime.utcnow().isoformat(),
-                    'content_type': content_type,
-                    'context_used': bool(context),
-                    'llm_available': self.llm_enabled
-                }
-            }
+            return result
             
         except Exception as e:
             logger.error(f"Intelligent content optimization failed: {e}")
+            # Return safe fallback
             return {
                 'original_content': text,
                 'optimized_content': text,
                 'optimization_score': 0.5,
-                'improvements_made': ['Optimization failed - using original content'],
-                'hashtag_suggestions': [],
-                'keyword_suggestions': [],
-                'estimated_reach_improvement': 0.0,
                 'llm_enhanced': False,
-                'optimization_mode': 'fallback',
-                'suggestions': ['Manual review recommended'],
                 'error': str(e),
-                'metadata': {
-                    'optimization_timestamp': datetime.utcnow().isoformat(),
-                    'content_type': content_type,
-                    'error': str(e)
-                }
+                'optimization_mode': 'fallback'
             }
     
     def optimize_content(self, text: str, content_type: str, 
@@ -233,7 +212,7 @@ class SEOService:
         try:
             # Use intelligent optimization but return only the optimized text
             result = asyncio.run(self.optimize_content_intelligent(
-                text, content_type, context, 'hybrid'
+                text, content_type, context, 'comprehensive'
             ))
             return result.get('optimized_content', text)
             
@@ -296,7 +275,7 @@ class SEOService:
                         variation.get('content', content),
                         content_type,
                         {'founder_id': founder_id},
-                        'traditional'  # Use traditional for variations to avoid over-processing
+                        'comprehensive'  # Use comprehensive for variations
                     )
                     
                     enhanced_variations.append({
@@ -1044,12 +1023,42 @@ def create_enhanced_seo_service(twitter_client: TwitterAPIClient,
                               data_flow_manager: DataFlowManager,
                               llm_client=None,
                               config: Dict[str, Any] = None) -> SEOService:
-    """Create enhanced SEO service with LLM integration"""
+    """
+    Factory function to create enhanced SEO service with comprehensive LLM integration
+    
+    Args:
+        twitter_client: Twitter API client
+        user_service: User profile service
+        data_flow_manager: Data flow manager
+        llm_client: LLM client (OpenAI, Anthropic, etc.)
+        config: Service configuration
+        
+    Returns:
+        Enhanced SEO service instance
+    """
+    
+    # Default enhanced configuration
+    default_config = {
+        'default_optimization_mode': 'comprehensive',
+        'llm_optimization_mode': 'comprehensive',
+        'enable_fallback_protection': True,
+        'llm_enhancement_threshold': 0.3,
+        'max_hashtags': 5,
+        'hashtag_strategy': 'engagement_optimized',
+        'use_trending_hashtags': True,
+        'cache_duration_hours': 6,
+        'enable_intelligent_analysis': True,
+        'auto_variation_generation': True
+    }
+    
+    # Merge with provided config
+    if config:
+        default_config.update(config)
     
     return SEOService(
         twitter_client=twitter_client,
         user_service=user_service,
         data_flow_manager=data_flow_manager,
         llm_client=llm_client,
-        config=config
+        config=default_config
     )

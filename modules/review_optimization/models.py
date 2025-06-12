@@ -12,13 +12,16 @@ import uuid
 class ReviewDecision(str, Enum):
     """Review decisions available to founders"""
     APPROVE = "approve"
+    APPROVE_FOR_LATER = "approve_for_later"
     EDIT_AND_APPROVE = "edit_and_approve"
+    EDIT_AND_APPROVE_FOR_LATER = "edit_and_approve_for_later"
     REJECT = "reject"
 
 class DraftStatus(str, Enum):
     """Status of content drafts in the review process"""
     PENDING_REVIEW = "pending_review"
     APPROVED = "approved"
+    APPROVED_PENDING_SCHEDULE = "approved_pending_schedule"
     REJECTED = "rejected"
     SCHEDULED = "scheduled"
     POSTED = "posted"

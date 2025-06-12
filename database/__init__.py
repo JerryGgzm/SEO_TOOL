@@ -149,6 +149,19 @@ def get_db_manager():
     
     return DatabaseManager()
 
+def get_data_flow_manager():
+    """
+    Get a DataFlowManager instance with database session
+    
+    Returns:
+        DataFlowManager: Configured data flow manager
+    """
+    if _SessionLocal is None:
+        raise RuntimeError("Database not initialized. Call init_database() first.")
+    
+    # Create a database session for the DataFlowManager
+    db_session = get_db_session()
+    return DataFlowManager(db_session)
 
 __all__ = [
     'BaseRepository',
@@ -171,5 +184,6 @@ __all__ = [
     'get_db_context',
     'get_db_session',
     'get_db_manager',
+    'get_data_flow_manager',
     'health_check'
 ]

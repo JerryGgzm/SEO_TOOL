@@ -166,6 +166,10 @@ class ReviewOptimizationService:
                 # Trigger downstream processes if approved
                 if decision_request.decision in [ReviewDecision.APPROVE, ReviewDecision.EDIT_AND_APPROVE]:
                     await self._trigger_post_approval_processes(draft_id, decision_request)
+                
+                # For "approve for later" decisions, just record but don't trigger scheduling
+                elif decision_request.decision in [ReviewDecision.APPROVE_FOR_LATER, ReviewDecision.EDIT_AND_APPROVE_FOR_LATER]:
+                    logger.info(f"Content {draft_id} approved for later scheduling - no immediate publishing actions triggered")
             
             return success
             
@@ -476,6 +480,55 @@ class ReviewOptimizationService:
             logger.error(f"Failed to get review queue: {e}")
             return ReviewQueue(founder_id=founder_id)
     
+    async def get_approved_pending_schedule(self, founder_id: str, limit: int = 20, 
+                                          offset: int = 0) -> List[ContentDraftReview]:
+        """
+        Get content that is approved but pending scheduling
+        
+        Args:
+            founder_id: Founder's ID
+            limit: Maximum number of drafts to return
+            offset: Offset for pagination
+            
+        Returns:
+            List of approved pending schedule drafts
+        """
+        try:
+            logger.info(f"Getting approved pending schedule drafts for founder {founder_id}")
+            
+            # Query database for approved pending schedule drafts
+            db_drafts = self.data_flow_manager.get_content_drafts_by_status(
+                founder_id, ['approved_pending_schedule'], limit, offset
+            )
+            
+            if not db_drafts:
+                return []
+            
+            # Convert database models to service models
+            pending_drafts = []
+            for db_draft in db_drafts:
+                try:
+                    draft_review = self.db_adapter.from_database_format(db_draft)
+                    pending_drafts.append(draft_review)
+                except Exception as e:
+                    logger.error(f"Failed to convert draft {db_draft.get('id')}: {e}")
+                    continue
+            
+            # Sort by priority and creation time
+            pending_drafts.sort(
+                key=lambda x: (
+                    0 if x.priority == ContentPriority.HIGH else
+                    1 if x.priority == ContentPriority.MEDIUM else 2,
+                    x.created_at
+                )
+            )
+            
+            return pending_drafts
+            
+        except Exception as e:
+            logger.error(f"Failed to get approved pending schedule drafts: {e}")
+            return []
+    
     # Helper methods
     
     async def _enrich_draft_details(self, draft: ContentDraftReview) -> None:
@@ -514,8 +567,29 @@ class ReviewOptimizationService:
             if decision_request.decision == ReviewDecision.APPROVE:
                 update_data['status'] = DraftStatus.APPROVED.value
                 
+            elif decision_request.decision == ReviewDecision.APPROVE_FOR_LATER:
+                update_data['status'] = DraftStatus.APPROVED_PENDING_SCHEDULE.value
+                
             elif decision_request.decision == ReviewDecision.EDIT_AND_APPROVE:
                 update_data['status'] = DraftStatus.APPROVED.value
+                update_data['current_content'] = decision_request.edited_content
+                
+                # Record edit in history
+                edit_record = {
+                    'original_content': db_draft.generated_text,
+                    'edited_content': decision_request.edited_content,
+                    'edit_reason': decision_request.feedback,
+                    'edit_timestamp': datetime.utcnow(),
+                    'editor_id': reviewer_id
+                }
+                
+                # Add to edit history
+                existing_history = db_draft.edit_history or []
+                existing_history.append(edit_record)
+                update_data['edit_history'] = existing_history
+                
+            elif decision_request.decision == ReviewDecision.EDIT_AND_APPROVE_FOR_LATER:
+                update_data['status'] = DraftStatus.APPROVED_PENDING_SCHEDULE.value
                 update_data['current_content'] = decision_request.edited_content
                 
                 # Record edit in history
@@ -712,12 +786,13 @@ class ReviewOptimizationService:
     def _is_valid_status_transition(self, current_status: str, new_status: DraftStatus) -> bool:
         """Validate status transitions"""
         valid_transitions = {
-            DraftStatus.PENDING_REVIEW: [DraftStatus.APPROVED, DraftStatus.REJECTED, DraftStatus.EDITING, DraftStatus.SCHEDULED],
+            DraftStatus.PENDING_REVIEW: [DraftStatus.APPROVED, DraftStatus.APPROVED_PENDING_SCHEDULE, DraftStatus.REJECTED, DraftStatus.EDITING, DraftStatus.SCHEDULED],
             DraftStatus.APPROVED: [DraftStatus.SCHEDULED, DraftStatus.POSTED, DraftStatus.EDITING],
+            DraftStatus.APPROVED_PENDING_SCHEDULE: [DraftStatus.SCHEDULED, DraftStatus.POSTED, DraftStatus.EDITING, DraftStatus.APPROVED],
             DraftStatus.REJECTED: [DraftStatus.PENDING_REVIEW, DraftStatus.EDITING],
             DraftStatus.SCHEDULED: [DraftStatus.POSTED, DraftStatus.APPROVED, DraftStatus.EDITING],
             DraftStatus.POSTED: [],  # Posted is final
-            DraftStatus.EDITING: [DraftStatus.PENDING_REVIEW, DraftStatus.APPROVED, DraftStatus.REJECTED]
+            DraftStatus.EDITING: [DraftStatus.PENDING_REVIEW, DraftStatus.APPROVED, DraftStatus.APPROVED_PENDING_SCHEDULE, DraftStatus.REJECTED]
         }
         
         try:
@@ -818,20 +893,239 @@ class ReviewOptimizationService:
     async def _notify_scheduling_module(self, draft_id: str) -> None:
         """Notify scheduling module of new approved content"""
         try:
-            # TODO
-            # This would send event to scheduling module
-            # Could use event bus, message queue, or direct API call
+            # Get draft details to include in notification
+            db_draft = self.data_flow_manager.get_content_draft_by_id(draft_id)
+            if not db_draft:
+                logger.warning(f"Draft {draft_id} not found for scheduling notification")
+                return
+            
+            # Create notification data for scheduling module
             notification_data = {
                 'event_type': 'content_approved',
                 'draft_id': draft_id,
-                'timestamp': datetime.utcnow().isoformat()
+                'founder_id': db_draft.founder_id,
+                'content_type': db_draft.content_type,
+                'content_preview': db_draft.current_content[:100] if db_draft.current_content else '',
+                'status': db_draft.status,
+                'priority': getattr(db_draft, 'priority', 5),
+                'created_at': db_draft.created_at.isoformat() if db_draft.created_at else None,
+                'updated_at': db_draft.updated_at.isoformat() if db_draft.updated_at else None,
+                'scheduled_time': db_draft.scheduled_post_time.isoformat() if db_draft.scheduled_post_time else None,
+                'timestamp': datetime.utcnow().isoformat(),
+                'source_module': 'review_optimization'
             }
             
-            # Send notification (implementation depends on architecture)
-            # await self.event_bus.publish('content_approved', notification_data)
+            # Method 1: Direct integration with SchedulingPostingService
+            # This is the most direct approach for your architecture
+            try:
+                # Import scheduling service (avoid circular imports by importing here)
+                from modules.scheduling_posting.service import SchedulingPostingService
+                from modules.twitter_api import get_twitter_client
+                from modules.user_profile import get_user_service
+                
+                # Initialize scheduling service if not already available
+                if not hasattr(self, '_scheduling_service'):
+                    twitter_client = get_twitter_client()
+                    user_service = get_user_service()
+                    self._scheduling_service = SchedulingPostingService(
+                        data_flow_manager=self.data_flow_manager,
+                        twitter_client=twitter_client,
+                        user_profile_service=user_service,
+                        analytics_collector=self.analytics_collector
+                    )
+                
+                # Check if content should be auto-scheduled
+                if db_draft.scheduled_post_time:
+                    # Content already has a scheduled time - add to queue
+                    await self._add_content_to_scheduling_queue(notification_data)
+                    logger.info(f"Added approved content {draft_id} to scheduling queue")
+                elif await self._should_auto_schedule(db_draft.founder_id):
+                    # Auto-schedule based on user preferences
+                    await self._auto_schedule_approved_content(db_draft.founder_id, draft_id)
+                    logger.info(f"Auto-scheduled approved content {draft_id}")
+                else:
+                    # Just notify that content is available for manual scheduling
+                    await self._notify_content_available_for_scheduling(notification_data)
+                    logger.info(f"Notified scheduling module about available content {draft_id}")
+                
+            except ImportError as import_error:
+                logger.warning(f"Could not import scheduling service: {import_error}")
+                # Fallback to data storage approach
+                await self._store_scheduling_notification(notification_data)
+                
+            # Method 2: Event-based notification (if you have an event system)
+            # This would be useful for decoupled architecture
+            if hasattr(self, 'event_publisher'):
+                await self.event_publisher.publish('content_approved', notification_data)
+                logger.info(f"Published content_approved event for draft {draft_id}")
+            
+            # Method 3: Database-based notification queue
+            # Store notification in database for scheduling module to pick up
+            await self._store_scheduling_notification(notification_data)
+            
+            logger.info(f"Successfully notified scheduling module about approved content {draft_id}")
             
         except Exception as e:
             logger.warning(f"Failed to notify scheduling module: {e}")
+    
+    async def _add_content_to_scheduling_queue(self, notification_data: Dict[str, Any]) -> None:
+        """Add content to scheduling queue for processing"""
+        try:
+            queue_data = {
+                'draft_id': notification_data['draft_id'],
+                'founder_id': notification_data['founder_id'],
+                'scheduled_time': notification_data['scheduled_time'],
+                'status': 'scheduled',
+                'priority': notification_data.get('priority', 5),
+                'content_type': notification_data['content_type'],
+                'created_at': datetime.utcnow().isoformat(),
+                'source': 'review_approval'
+            }
+            
+            # Store in scheduling queue (implement this method if it doesn't exist)
+            if hasattr(self.data_flow_manager, 'add_to_scheduling_queue'):
+                self.data_flow_manager.add_to_scheduling_queue(queue_data)
+            else:
+                # Alternative: store in a generic scheduling events table
+                await self._store_scheduling_event('content_queued', queue_data)
+                
+        except Exception as e:
+            logger.error(f"Failed to add content to scheduling queue: {e}")
+    
+    async def _should_auto_schedule(self, founder_id: str) -> bool:
+        """Check if user has auto-scheduling enabled"""
+        try:
+            # Get user preferences
+            user_settings = self.data_flow_manager.get_founder_settings(founder_id)
+            if user_settings:
+                scheduling_prefs = user_settings.get('scheduling_preferences', {})
+                return scheduling_prefs.get('auto_schedule_enabled', False)
+            return False
+        except Exception as e:
+            logger.warning(f"Failed to check auto-schedule preference: {e}")
+            return False
+    
+    async def _auto_schedule_approved_content(self, founder_id: str, draft_id: str) -> None:
+        """Auto-schedule approved content based on user preferences"""
+        try:
+            if hasattr(self, '_scheduling_service'):
+                # Use scheduling service to calculate optimal time
+                optimal_time = await self._scheduling_service._calculate_optimal_schedule_time(
+                    founder_id, draft_id
+                )
+                
+                # Create schedule request
+                from modules.scheduling_posting.models import ScheduleRequest
+                schedule_request = ScheduleRequest(
+                    content_id=draft_id,
+                    scheduled_time=optimal_time,
+                    timezone="UTC",
+                    priority=5
+                )
+                
+                # Schedule the content
+                result = await self._scheduling_service.schedule_content(founder_id, schedule_request)
+                if result.success:
+                    logger.info(f"Successfully auto-scheduled content {draft_id}")
+                else:
+                    logger.warning(f"Auto-scheduling failed for {draft_id}: {result.message}")
+                    
+        except Exception as e:
+            logger.error(f"Failed to auto-schedule content {draft_id}: {e}")
+    
+    async def _notify_content_available_for_scheduling(self, notification_data: Dict[str, Any]) -> None:
+        """Notify that content is available for manual scheduling"""
+        try:
+            # Store notification for scheduling dashboard/UI to pick up
+            notification_record = {
+                'type': 'content_available',
+                'draft_id': notification_data['draft_id'],
+                'founder_id': notification_data['founder_id'],
+                'content_preview': notification_data['content_preview'],
+                'status': 'pending_schedule',
+                'created_at': datetime.utcnow().isoformat(),
+                'read': False
+            }
+            
+            await self._store_scheduling_event('content_available', notification_record)
+            
+        except Exception as e:
+            logger.error(f"Failed to notify content available: {e}")
+    
+    async def _store_scheduling_notification(self, notification_data: Dict[str, Any]) -> None:
+        """Store scheduling notification in database"""
+        try:
+            # Create scheduling notifications table if it doesn't exist
+            self.data_flow_manager.db_session.execute("""
+                CREATE TABLE IF NOT EXISTS scheduling_notifications (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_type TEXT NOT NULL,
+                    draft_id TEXT NOT NULL,
+                    founder_id TEXT NOT NULL,
+                    notification_data TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    processed_at TIMESTAMP,
+                    FOREIGN KEY (founder_id) REFERENCES founders(id),
+                    FOREIGN KEY (draft_id) REFERENCES generated_content_drafts(id)
+                )
+            """)
+            
+            # Insert notification record
+            self.data_flow_manager.db_session.execute("""
+                INSERT INTO scheduling_notifications (
+                    event_type, draft_id, founder_id, notification_data
+                ) VALUES (?, ?, ?, ?)
+            """, (
+                notification_data['event_type'],
+                notification_data['draft_id'],
+                notification_data['founder_id'],
+                json.dumps(notification_data)
+            ))
+            
+            self.data_flow_manager.db_session.commit()
+            logger.info(f"Stored scheduling notification for draft {notification_data['draft_id']}")
+            
+        except Exception as e:
+            logger.error(f"Failed to store scheduling notification: {e}")
+            if hasattr(self.data_flow_manager, 'db_session'):
+                self.data_flow_manager.db_session.rollback()
+    
+    async def _store_scheduling_event(self, event_type: str, event_data: Dict[str, Any]) -> None:
+        """Store scheduling event for processing"""
+        try:
+            # Create scheduling events table if it doesn't exist
+            self.data_flow_manager.db_session.execute("""
+                CREATE TABLE IF NOT EXISTS scheduling_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_type TEXT NOT NULL,
+                    founder_id TEXT NOT NULL,
+                    event_data TEXT NOT NULL,
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    processed_at TIMESTAMP,
+                    FOREIGN KEY (founder_id) REFERENCES founders(id)
+                )
+            """)
+            
+            # Insert event record
+            self.data_flow_manager.db_session.execute("""
+                INSERT INTO scheduling_events (
+                    event_type, founder_id, event_data
+                ) VALUES (?, ?, ?)
+            """, (
+                event_type,
+                event_data.get('founder_id'),
+                json.dumps(event_data)
+            ))
+            
+            self.data_flow_manager.db_session.commit()
+            logger.info(f"Stored scheduling event: {event_type}")
+            
+        except Exception as e:
+            logger.error(f"Failed to store scheduling event: {e}")
+            if hasattr(self.data_flow_manager, 'db_session'):
+                self.data_flow_manager.db_session.rollback()
     
     # Public analytics methods
     
@@ -975,13 +1269,153 @@ class ReviewOptimizationService:
     
     def _analyze_seo_impact(self, original: str, edited: str) -> Dict[str, Any]:
         """Analyze SEO impact of changes"""
-        #TODO
+        # Calculate keyword density changes
+        keyword_density_change = self._calculate_keyword_density_change(original, edited)
+        
+        # Calculate other SEO metrics
+        original_hashtags = len([w for w in original.split() if w.startswith('#')])
+        edited_hashtags = len([w for w in edited.split() if w.startswith('#')])
+        
         return {
-            'keyword_density_change': 0.0,  # Simplified
-            'hashtag_optimization': len([w for w in edited.split() if w.startswith('#')]) > len([w for w in original.split() if w.startswith('#')]),
+            'keyword_density_change': keyword_density_change,
+            'hashtag_optimization': edited_hashtags > original_hashtags,
+            'hashtag_count_change': edited_hashtags - original_hashtags,
             'length_optimization': 50 <= len(edited) <= 280,
-            'engagement_elements_added': '?' in edited and '?' not in original
+            'engagement_elements_added': '?' in edited and '?' not in original,
+            'keyword_analysis': self._get_keyword_analysis(original, edited)
         }
+    
+    def _calculate_keyword_density_change(self, original: str, edited: str) -> float:
+        """Calculate the change in keyword density between original and edited content"""
+        try:
+            import re
+            from collections import Counter
+            
+            # Extract keywords (exclude common stop words and hashtags)
+            stop_words = {
+                'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'can', 'this', 'that', 'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them', 'my', 'your', 'his', 'her', 'its', 'our', 'their'
+            }
+            
+            def extract_keywords(text: str) -> Counter:
+                # Convert to lowercase and remove punctuation except hashtags
+                cleaned_text = re.sub(r'[^\w\s#]', ' ', text.lower())
+                words = cleaned_text.split()
+                
+                # Filter out stop words, very short words, and hashtags
+                keywords = [
+                    word for word in words 
+                    if len(word) > 2 
+                    and word not in stop_words 
+                    and not word.startswith('#')
+                    and word.isalpha()  # Only alphabetic words
+                ]
+                
+                return Counter(keywords)
+            
+            def calculate_density(keyword_counts: Counter, total_words: int) -> Dict[str, float]:
+                if total_words == 0:
+                    return {}
+                return {keyword: (count / total_words) * 100 for keyword, count in keyword_counts.items()}
+            
+            # Extract keywords from both texts
+            original_keywords = extract_keywords(original)
+            edited_keywords = extract_keywords(edited)
+            
+            # Calculate total word counts (excluding stop words)
+            original_total = sum(original_keywords.values())
+            edited_total = sum(edited_keywords.values())
+            
+            if original_total == 0 and edited_total == 0:
+                return 0.0
+            
+            # Calculate keyword densities
+            original_densities = calculate_density(original_keywords, original_total)
+            edited_densities = calculate_density(edited_keywords, edited_total)
+            
+            # Calculate overall density change
+            # Focus on top keywords from both versions
+            all_keywords = set(original_keywords.keys()) | set(edited_keywords.keys())
+            top_keywords = sorted(all_keywords, 
+                                key=lambda k: max(original_keywords.get(k, 0), edited_keywords.get(k, 0)), 
+                                reverse=True)[:10]  # Top 10 keywords
+            
+            total_density_change = 0.0
+            keyword_changes = 0
+            
+            for keyword in top_keywords:
+                original_density = original_densities.get(keyword, 0.0)
+                edited_density = edited_densities.get(keyword, 0.0)
+                density_change = edited_density - original_density
+                
+                if abs(density_change) > 0.1:  # Only count significant changes
+                    total_density_change += density_change
+                    keyword_changes += 1
+            
+            # Return average density change for significant keywords
+            if keyword_changes > 0:
+                return round(total_density_change / keyword_changes, 2)
+            else:
+                return 0.0
+                
+        except Exception as e:
+            logger.warning(f"Failed to calculate keyword density change: {e}")
+            return 0.0
+    
+    def _get_keyword_analysis(self, original: str, edited: str) -> Dict[str, Any]:
+        """Get detailed keyword analysis"""
+        try:
+            import re
+            from collections import Counter
+            
+            def extract_keywords_with_counts(text: str) -> tuple:
+                stop_words = {
+                    'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'must', 'can', 'this', 'that', 'these', 'those', 'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her', 'us', 'them', 'my', 'your', 'his', 'her', 'its', 'our', 'their'
+                }
+                
+                cleaned_text = re.sub(r'[^\w\s#]', ' ', text.lower())
+                all_words = cleaned_text.split()
+                total_words = len(all_words)
+                
+                keywords = [
+                    word for word in all_words 
+                    if len(word) > 2 
+                    and word not in stop_words 
+                    and not word.startswith('#')
+                    and word.isalpha()
+                ]
+                
+                return Counter(keywords), total_words
+            
+            original_keywords, original_total = extract_keywords_with_counts(original)
+            edited_keywords, edited_total = extract_keywords_with_counts(edited)
+            
+            # Find top keywords in each version
+            original_top = dict(original_keywords.most_common(5))
+            edited_top = dict(edited_keywords.most_common(5))
+            
+            # Find new keywords (in edited but not in original)
+            new_keywords = set(edited_keywords.keys()) - set(original_keywords.keys())
+            
+            # Find removed keywords (in original but not in edited)
+            removed_keywords = set(original_keywords.keys()) - set(edited_keywords.keys())
+            
+            # Calculate density for top keywords
+            original_densities = {k: round((v / max(original_total, 1)) * 100, 2) for k, v in original_top.items()}
+            edited_densities = {k: round((v / max(edited_total, 1)) * 100, 2) for k, v in edited_top.items()}
+            
+            return {
+                'original_top_keywords': original_densities,
+                'edited_top_keywords': edited_densities,
+                'new_keywords': list(new_keywords)[:5],  # Top 5 new keywords
+                'removed_keywords': list(removed_keywords)[:5],  # Top 5 removed keywords
+                'total_unique_keywords_original': len(original_keywords),
+                'total_unique_keywords_edited': len(edited_keywords),
+                'keyword_diversity_change': len(edited_keywords) - len(original_keywords)
+            }
+            
+        except Exception as e:
+            logger.warning(f"Failed to get keyword analysis: {e}")
+            return {}
     
     def _analyze_readability_impact(self, original: str, edited: str) -> Dict[str, Any]:
         """Analyze readability impact of changes"""

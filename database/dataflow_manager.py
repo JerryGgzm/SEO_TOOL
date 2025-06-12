@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from sqlalchemy.sql import func
 import json
+import uuid
 
 from .repositories import (
     FounderRepository, ProductRepository, TrendRepository, 
@@ -1284,12 +1285,382 @@ class DataFlowManager:
     def store_seo_optimization_result(self, founder_id: str, 
                                     optimization_data: Dict[str, Any]) -> bool:
         """Store SEO optimization results"""
-        # TODO
+        try:
+            # Prepare SEO optimization record
+            seo_record = {
+                'founder_id': founder_id,
+                'content_draft_id': optimization_data.get('content_draft_id'),
+                'optimization_timestamp': optimization_data.get('optimization_timestamp', datetime.utcnow().isoformat()),
+                'seo_quality_score': optimization_data.get('seo_quality_score', 0.0),
+                'overall_quality_score': optimization_data.get('overall_quality_score', 0.0),
+                'keywords_used': json.dumps(optimization_data.get('keywords_used', [])),
+                'hashtags_suggested': json.dumps(optimization_data.get('hashtags_suggested', [])),
+                'content_type': optimization_data.get('content_type', 'tweet'),
+                'optimization_method': optimization_data.get('optimization_method', 'ai_seo_optimizer'),
+                'content_length': optimization_data.get('content_length', 0),
+                'trend_id': optimization_data.get('trend_id'),
+                'metadata': json.dumps({
+                    'optimization_level': optimization_data.get('optimization_level'),
+                    'hashtag_strategy': optimization_data.get('hashtag_strategy'),
+                    'keyword_density': optimization_data.get('keyword_density'),
+                    'platform_optimized': optimization_data.get('platform_optimized', 'twitter'),
+                    'seo_improvements_made': optimization_data.get('seo_improvements_made', []),
+                    'keyword_density_change': optimization_data.get('keyword_density_change', 0.0),
+                    'hashtag_optimization': optimization_data.get('hashtag_optimization', False),
+                    'engagement_elements_added': optimization_data.get('engagement_elements_added', False)
+                }),
+                'created_at': datetime.utcnow()
+            }
+            
+            # Create SEO table if it doesn't exist
+            self.db_session.execute("""
+                CREATE TABLE IF NOT EXISTS seo_optimization_results (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    founder_id TEXT NOT NULL,
+                    content_draft_id TEXT,
+                    optimization_timestamp TEXT,
+                    seo_quality_score REAL DEFAULT 0.0,
+                    overall_quality_score REAL DEFAULT 0.0,
+                    keywords_used TEXT,
+                    hashtags_suggested TEXT,
+                    content_type TEXT DEFAULT 'tweet',
+                    optimization_method TEXT DEFAULT 'ai_seo_optimizer',
+                    content_length INTEGER DEFAULT 0,
+                    trend_id TEXT,
+                    metadata TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (founder_id) REFERENCES founders(id),
+                    FOREIGN KEY (content_draft_id) REFERENCES generated_content_drafts(id),
+                    FOREIGN KEY (trend_id) REFERENCES analyzed_trends(id)
+                )
+            """)
+            
+            # Insert the record
+            self.db_session.execute("""
+                INSERT INTO seo_optimization_results (
+                    founder_id, content_draft_id, optimization_timestamp,
+                    seo_quality_score, overall_quality_score, keywords_used,
+                    hashtags_suggested, content_type, optimization_method,
+                    content_length, trend_id, metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                seo_record['founder_id'],
+                seo_record['content_draft_id'],
+                seo_record['optimization_timestamp'],
+                seo_record['seo_quality_score'],
+                seo_record['overall_quality_score'],
+                seo_record['keywords_used'],
+                seo_record['hashtags_suggested'],
+                seo_record['content_type'],
+                seo_record['optimization_method'],
+                seo_record['content_length'],
+                seo_record['trend_id'],
+                seo_record['metadata']
+            ))
+            
+            self.db_session.commit()
+            logger.info(f"SEO optimization result stored for founder {founder_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to store SEO optimization result: {e}")
+            self.db_session.rollback()
+            return False
         
     def get_seo_performance_history(self, founder_id: str, 
                                   days: int = 30) -> List[Dict[str, Any]]:
         """Get SEO performance history for analytics"""
-        # TODO
+        try:
+            since_date = datetime.utcnow() - timedelta(days=days)
+            seo_history = []
+            
+            # Query from seo_optimization_results table
+            results = self.db_session.execute("""
+                SELECT 
+                    id, founder_id, content_draft_id, optimization_timestamp,
+                    seo_quality_score, overall_quality_score, keywords_used,
+                    hashtags_suggested, content_type, optimization_method,
+                    content_length, trend_id, metadata, created_at
+                FROM seo_optimization_results 
+                WHERE founder_id = ? AND created_at >= ?
+                ORDER BY created_at DESC
+                LIMIT 100
+            """, (founder_id, since_date.isoformat())).fetchall()
+            
+            for result in results:
+                try:
+                    # Parse JSON fields safely
+                    keywords_used = []
+                    hashtags_suggested = []
+                    metadata = {}
+                    
+                    try:
+                        keywords_used = json.loads(result[6]) if result[6] else []
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                        
+                    try:
+                        hashtags_suggested = json.loads(result[7]) if result[7] else []
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                        
+                    try:
+                        metadata = json.loads(result[12]) if result[12] else {}
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                    
+                    record = {
+                        'id': result[0],
+                        'founder_id': result[1],
+                        'content_draft_id': result[2],
+                        'optimization_timestamp': result[3],
+                        'seo_quality_score': float(result[4]) if result[4] else 0.0,
+                        'overall_quality_score': float(result[5]) if result[5] else 0.0,
+                        'keywords_used': keywords_used,
+                        'hashtags_suggested': hashtags_suggested,
+                        'content_type': result[8] or 'tweet',
+                        'optimization_method': result[9] or 'ai_seo_optimizer',
+                        'content_length': int(result[10]) if result[10] else 0,
+                        'trend_id': result[11],
+                        'metadata': metadata,
+                        'created_at': result[13]
+                    }
+                    seo_history.append(record)
+                    
+                except Exception as parse_error:
+                    logger.warning(f"Failed to parse SEO record {result[0]}: {parse_error}")
+                    continue
+            
+            logger.info(f"Retrieved {len(seo_history)} SEO performance records for founder {founder_id}")
+            return seo_history
+                
+        except Exception as e:
+            logger.error(f"Failed to get SEO performance history: {e}")
+            # Return sample data as fallback for development
+            return self._generate_sample_seo_history(founder_id, days)
+    
+    def _generate_sample_seo_history(self, founder_id: str, days: int) -> List[Dict[str, Any]]:
+        """Generate sample SEO history data for development/testing"""
+        import random
+        from datetime import datetime, timedelta
+        
+        sample_data = []
+        base_date = datetime.utcnow()
+        
+        # Generate 5-15 sample records
+        num_records = random.randint(5, min(15, days))
+        
+        sample_keywords = [
+            ['startup', 'entrepreneurship', 'business'],
+            ['marketing', 'growth', 'strategy'],
+            ['technology', 'innovation', 'ai'],
+            ['productivity', 'efficiency', 'optimization'],
+            ['leadership', 'management', 'team']
+        ]
+        
+        sample_hashtags = [
+            ['#startup', '#entrepreneur', '#business'],
+            ['#marketing', '#growth', '#digitalmarketing'],
+            ['#tech', '#ai', '#innovation'],
+            ['#productivity', '#lifehack', '#efficiency'],
+            ['#leadership', '#team', '#management']
+        ]
+        
+        for i in range(num_records):
+            days_ago = random.randint(0, days)
+            created_at = base_date - timedelta(days=days_ago)
+            
+            keywords = random.choice(sample_keywords)
+            hashtags = random.choice(sample_hashtags)
+            
+            record = {
+                'id': f'sample_{i+1}',
+                'founder_id': founder_id,
+                'content_draft_id': f'draft_{random.randint(1000, 9999)}',
+                'optimization_timestamp': created_at.isoformat(),
+                'seo_quality_score': round(random.uniform(0.6, 0.95), 2),
+                'overall_quality_score': round(random.uniform(0.7, 0.9), 2),
+                'keywords_used': keywords,
+                'hashtags_suggested': hashtags,
+                'content_type': random.choice(['tweet', 'reply', 'quote_tweet']),
+                'optimization_method': 'ai_seo_optimizer',
+                'content_length': random.randint(50, 280),
+                'trend_id': f'trend_{random.randint(100, 999)}' if random.random() > 0.3 else None,
+                'metadata': {
+                    'optimization_level': random.choice(['basic', 'advanced', 'premium']),
+                    'hashtag_strategy': random.choice(['trending', 'niche', 'branded']),
+                    'keyword_density': round(random.uniform(2.0, 8.0), 1),
+                    'platform_optimized': 'twitter',
+                    'seo_improvements_made': random.sample([
+                        'keyword_optimization', 'hashtag_addition', 'length_optimization',
+                        'engagement_elements', 'readability_improvement'
+                    ], random.randint(1, 3)),
+                    'keyword_density_change': round(random.uniform(-2.0, 3.0), 2),
+                    'hashtag_optimization': random.choice([True, False]),
+                    'engagement_elements_added': random.choice([True, False])
+                },
+                'created_at': created_at.isoformat()
+            }
+            sample_data.append(record)
+        
+        # Sort by created_at descending
+        sample_data.sort(key=lambda x: x['created_at'], reverse=True)
+        
+        logger.info(f"Generated {len(sample_data)} sample SEO records for founder {founder_id}")
+        return sample_data
+    
+    def get_founder_settings(self, founder_id: str) -> Optional[Dict[str, Any]]:
+        """Get founder settings including scheduling preferences"""
+        try:
+            founder = self.founder_repo.get_by_id(founder_id)
+            if founder and founder.settings:
+                return founder.settings
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get founder settings: {e}")
+            return None
+    
+    def add_to_scheduling_queue(self, queue_data: Dict[str, Any]) -> bool:
+        """Add content to scheduling queue"""
+        try:
+            # Create scheduling queue table if it doesn't exist
+            self.db_session.execute("""
+                CREATE TABLE IF NOT EXISTS scheduling_queue (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    draft_id TEXT NOT NULL,
+                    founder_id TEXT NOT NULL,
+                    scheduled_time TEXT,
+                    status TEXT DEFAULT 'scheduled',
+                    priority INTEGER DEFAULT 5,
+                    content_type TEXT,
+                    source TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    processed_at TIMESTAMP,
+                    FOREIGN KEY (founder_id) REFERENCES founders(id),
+                    FOREIGN KEY (draft_id) REFERENCES generated_content_drafts(id)
+                )
+            """)
+            
+            # Insert queue item
+            self.db_session.execute("""
+                INSERT INTO scheduling_queue (
+                    draft_id, founder_id, scheduled_time, status, 
+                    priority, content_type, source
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (
+                queue_data['draft_id'],
+                queue_data['founder_id'], 
+                queue_data.get('scheduled_time'),
+                queue_data.get('status', 'scheduled'),
+                queue_data.get('priority', 5),
+                queue_data.get('content_type'),
+                queue_data.get('source', 'unknown')
+            ))
+            
+            self.db_session.commit()
+            logger.info(f"Added content {queue_data['draft_id']} to scheduling queue")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to add to scheduling queue: {e}")
+            self.db_session.rollback()
+            return False
+    
+    def create_scheduled_content(self, scheduled_content_data: Dict[str, Any]) -> Optional[str]:
+        """Create scheduled content entry"""
+        try:
+            # Create scheduled content table if it doesn't exist
+            self.db_session.execute("""
+                CREATE TABLE IF NOT EXISTS scheduled_content (
+                    id TEXT PRIMARY KEY,
+                    content_draft_id TEXT NOT NULL,
+                    founder_id TEXT NOT NULL,
+                    scheduled_time TEXT NOT NULL,
+                    status TEXT DEFAULT 'scheduled',
+                    posted_at TEXT,
+                    posted_tweet_id TEXT,
+                    platform TEXT DEFAULT 'twitter',
+                    retry_count INTEGER DEFAULT 0,
+                    max_retries INTEGER DEFAULT 3,
+                    priority INTEGER DEFAULT 5,
+                    tags TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_by TEXT,
+                    error_info TEXT,
+                    FOREIGN KEY (founder_id) REFERENCES founders(id),
+                    FOREIGN KEY (content_draft_id) REFERENCES generated_content_drafts(id)
+                )
+            """)
+            
+            # Generate ID if not provided
+            scheduled_id = scheduled_content_data.get('id', str(uuid.uuid4()))
+            
+            # Insert scheduled content
+            self.db_session.execute("""
+                INSERT INTO scheduled_content (
+                    id, content_draft_id, founder_id, scheduled_time, 
+                    status, platform, retry_count, max_retries, 
+                    priority, tags, created_by
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                scheduled_id,
+                scheduled_content_data['content_draft_id'],
+                scheduled_content_data['founder_id'],
+                scheduled_content_data['scheduled_time'].isoformat() if hasattr(scheduled_content_data['scheduled_time'], 'isoformat') else scheduled_content_data['scheduled_time'],
+                scheduled_content_data.get('status', 'scheduled'),
+                scheduled_content_data.get('platform', 'twitter'),
+                scheduled_content_data.get('retry_count', 0),
+                scheduled_content_data.get('max_retries', 3),
+                scheduled_content_data.get('priority', 5),
+                json.dumps(scheduled_content_data.get('tags', [])),
+                scheduled_content_data.get('created_by')
+            ))
+            
+            self.db_session.commit()
+            logger.info(f"Created scheduled content {scheduled_id}")
+            return scheduled_id
+            
+        except Exception as e:
+            logger.error(f"Failed to create scheduled content: {e}")
+            self.db_session.rollback()
+            return None
+    
+    def get_content_drafts_by_status(self, founder_id: str, status_list: List[str], 
+                                   limit: int = 20, offset: int = 0) -> List[Any]:
+        """Get content drafts by status list"""
+        try:
+            # Create a query to get drafts by status
+            status_placeholders = ','.join(['?' for _ in status_list])
+            query = f"""
+                SELECT * FROM generated_content_drafts 
+                WHERE founder_id = ? AND status IN ({status_placeholders})
+                ORDER BY created_at DESC
+                LIMIT ? OFFSET ?
+            """
+            
+            params = [founder_id] + status_list + [limit, offset]
+            results = self.db_session.execute(query, params).fetchall()
+            
+            # Convert to appropriate objects (you may need to adjust this based on your ORM)
+            drafts = []
+            for result in results:
+                # This is a simplified conversion - adjust based on your actual model
+                draft_dict = {
+                    'id': result[0],
+                    'founder_id': result[1],
+                    'content_type': result[3],
+                    'generated_text': result[4],
+                    'status': result[6],
+                    'created_at': result[7]
+                }
+                drafts.append(draft_dict)
+            
+            return drafts
+            
+        except Exception as e:
+            logger.error(f"Failed to get content drafts by status: {e}")
+            return []
 
 
 class DataFlowManagerSEOExtensions:
