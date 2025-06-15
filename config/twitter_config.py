@@ -9,8 +9,8 @@ class TwitterConfig:
     CLIENT_SECRET = os.getenv('TWITTER_CLIENT_SECRET')
     
     # API URLs (configurable for future changes)
-    API_BASE_URL_V2 = os.getenv('TWITTER_API_V2_URL', 'https://api.twitter.com/2')
-    API_BASE_URL_V1_1 = os.getenv('TWITTER_API_V1_1_URL', 'https://api.twitter.com/1.1')
+    API_BASE_URL_V2 = os.getenv('TWITTER_API_V2_URL', 'https://api.x.com/2')
+    API_BASE_URL_V1_1 = os.getenv('TWITTER_API_V1_1_URL', 'https://api.x.com/1.1')
     
     # Rate Limiting Settings
     DEFAULT_RATE_LIMIT_WINDOW = 900  # 15 minutes

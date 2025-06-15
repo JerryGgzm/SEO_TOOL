@@ -1,300 +1,231 @@
-from flask import Blueprint, request, jsonify, current_app
-from typing import Dict, Any, Optional
-import logging
-import asyncio
+"""Trend Analysis API Routes
 
-from modules.trend_analysis import (
-    TrendAnalysisEngine, TrendAnalysisRequest, TrendAnalysisConfig,
-    TrendAnalysisRepository
-)
+This module implements the FastAPI routes for trend analysis,
+handling trend detection, analysis and reporting.
+"""
+from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, Query, Path, status
+from fastapi.responses import JSONResponse
+import logging
+
+from database import get_data_flow_manager, DataFlowManager
+from api.middleware import get_current_user, User
+
+from modules.trend_analysis.engine import TrendAnalysisEngine
+from modules.trend_analysis.repository import TrendAnalysisRepository
 from modules.twitter_api import TwitterAPIClient
-from modules.user_profile import UserProfileService
-from api.middleware import require_auth, get_user_service
 
 logger = logging.getLogger(__name__)
 
-# Create blueprint for trend analysis routes
-trends_bp = Blueprint('trend_analysis', __name__, url_prefix='/api/trends')
+# Create router
+router = APIRouter(prefix="/api/trends", tags=["trend-analysis"])
 
-def get_trend_analysis_engine() -> TrendAnalysisEngine:
-    """Get configured trend analysis engine"""
-    # Get dependencies
-    twitter_client = get_twitter_client()
-    user_service = get_user_service()
-    
-    # Configure analysis
-    config = TrendAnalysisConfig(
-        max_tweets_per_trend=150,
-        use_llm_for_insights=current_app.config.get('ENABLE_LLM_INSIGHTS', True),
-        llm_model_name=current_app.config.get('LLM_MODEL_NAME', 'gpt-3.5-turbo')
-    )
-    
-    # Initialize LLM client if configured
-    llm_client = None
-    if config.use_llm_for_insights:
-        try:
-            import openai
-            llm_client = openai.OpenAI(
-                api_key=current_app.config.get('OPENAI_API_KEY')
-            )
-        except ImportError:
-            logger.warning("OpenAI client not available, LLM insights disabled")
-    
-    return TrendAnalysisEngine(twitter_client, user_service, config, llm_client)
-
-def get_twitter_client() -> TwitterAPIClient:
-    """Get Twitter API client"""
-    from modules.twitter_api import TwitterAPIClient
-    
-    client_id = current_app.config.get('TWITTER_CLIENT_ID')
-    client_secret = current_app.config.get('TWITTER_CLIENT_SECRET')
-    
-    if not client_id or not client_secret:
-        raise ValueError("Twitter API credentials not configured")
-    
-    return TwitterAPIClient(client_id, client_secret)
-
-def get_trend_repository() -> TrendAnalysisRepository:
-    """Get trend analysis repository"""
-    from database.models import SessionLocal
-    db_session = SessionLocal()
-    return TrendAnalysisRepository(db_session)
-
-# ==================== Trend Analysis Operations ====================
-
-@trends_bp.route('/analyze', methods=['POST'])
-@require_auth
-def analyze_trends():
-    """Start trend analysis for the current user"""
+# Dependencies
+async def get_trend_analysis_engine(
+    data_flow_manager: DataFlowManager = Depends(get_data_flow_manager)
+) -> TrendAnalysisEngine:
+    """Get trend analysis engine with dependencies"""
     try:
-        data = request.get_json() or {}
-        
-        # Create analysis request
-        request_data = {
-            'user_id': request.current_user_id,
-            'focus_keywords': data.get('focus_keywords', []),
-            'location_id': data.get('location_id', '1'),
-            'max_trends_to_analyze': min(data.get('max_trends_to_analyze', 10), 20),
-            'tweet_sample_size': min(data.get('tweet_sample_size', 100), 200),
-            'include_micro_trends': data.get('include_micro_trends', True),
-            'sentiment_analysis_depth': data.get('sentiment_analysis_depth', 'standard')
-        }
-        
-        try:
-            analysis_request = TrendAnalysisRequest(**request_data)
-        except Exception as e:
-            return jsonify({'error': f'Invalid request parameters: {str(e)}'}), 400
-        
-        # Run analysis
-        engine = get_trend_analysis_engine()
-        
-        # Use asyncio to run the async analysis
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            analyzed_trends = loop.run_until_complete(
-                engine.analyze_trends_for_user(request.current_user_id, analysis_request)
-            )
-        finally:
-            loop.close()
-        
-        # Store results
-        repository = get_trend_repository()
-        saved_count = 0
-        
-        for trend in analyzed_trends:
-            if repository.save_analyzed_trend(trend):
-                saved_count += 1
-        
-        # Return summary
-        return jsonify({
-            'message': f'Analysis completed successfully',
-            'trends_analyzed': len(analyzed_trends),
-            'trends_saved': saved_count,
-            'micro_trends_found': sum(1 for t in analyzed_trends if t.is_micro_trend),
-            'analysis_id': f"analysis_{request.current_user_id}_{int(datetime.utcnow().timestamp())}"
-        }), 200
-        
+        return TrendAnalysisEngine(data_flow_manager)
+    except Exception as e:
+        logger.error(f"Failed to create trend analysis engine: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to initialize trend analysis engine"
+        )
+
+async def get_twitter_client(
+    current_user: User = Depends(get_current_user)
+) -> TwitterAPIClient:
+    """Get Twitter client for current user"""
+    try:
+        return TwitterAPIClient(current_user.twitter_access_token)
+    except Exception as e:
+        logger.error(f"Failed to create Twitter client: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to initialize Twitter client"
+        )
+
+async def get_trend_repository(
+    data_flow_manager: DataFlowManager = Depends(get_data_flow_manager)
+) -> TrendAnalysisRepository:
+    """Get trend repository with dependencies"""
+    try:
+        return TrendAnalysisRepository(data_flow_manager)
+    except Exception as e:
+        logger.error(f"Failed to create trend repository: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to initialize trend repository"
+        )
+
+@router.post("/analyze")
+async def analyze_trends(
+    keywords: List[str] = Query(..., description="Keywords to analyze"),
+    timeframe: str = Query(default="24h", description="Analysis timeframe"),
+    current_user: User = Depends(get_current_user),
+    engine: TrendAnalysisEngine = Depends(get_trend_analysis_engine),
+    twitter_client: TwitterAPIClient = Depends(get_twitter_client)
+):
+    """Analyze trends based on keywords and timeframe"""
+    try:
+        results = await engine.analyze_trends(keywords, timeframe, twitter_client)
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "message": "Trend analysis completed successfully",
+                "results": results
+            }
+        )
     except Exception as e:
         logger.error(f"Trend analysis failed: {e}")
-        return jsonify({'error': 'Trend analysis failed'}), 500
-
-@trends_bp.route('/latest', methods=['GET'])
-@require_auth
-def get_latest_trends():
-    """Get latest analyzed trends for the current user"""
-    try:
-        limit = min(int(request.args.get('limit', 10)), 50)
-        include_expired = request.args.get('include_expired', 'false').lower() == 'true'
-        
-        repository = get_trend_repository()
-        trends = repository.get_latest_trends_for_user(
-            request.current_user_id, 
-            limit, 
-            include_expired
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to analyze trends"
         )
-        
-        # Convert to dict for JSON response
-        trends_data = []
-        for trend in trends:
-            trend_dict = trend.dict()
-            # Convert datetime objects to ISO strings
-            trend_dict['analyzed_at'] = trend.analyzed_at.isoformat()
-            if trend.expires_at:
-                trend_dict['expires_at'] = trend.expires_at.isoformat()
-            
-            trends_data.append(trend_dict)
-        
-        return jsonify({
-            'trends': trends_data,
-            'total_count': len(trends_data)
-        }), 200
-        
+
+@router.get("/latest")
+async def get_latest_trends(
+    limit: int = Query(default=10, ge=1, le=50, description="Number of trends to return"),
+    current_user: User = Depends(get_current_user),
+    repository: TrendAnalysisRepository = Depends(get_trend_repository)
+):
+    """Get latest trending topics"""
+    try:
+        trends = await repository.get_latest_trends(limit)
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "message": "Latest trends retrieved successfully",
+                "trends": trends
+            }
+        )
     except Exception as e:
         logger.error(f"Failed to get latest trends: {e}")
-        return jsonify({'error': 'Failed to retrieve trends'}), 500
-
-@trends_bp.route('/micro-trends', methods=['GET'])
-@require_auth
-def get_micro_trends():
-    """Get micro-trends for the current user"""
-    try:
-        limit = min(int(request.args.get('limit', 5)), 20)
-        
-        repository = get_trend_repository()
-        micro_trends = repository.get_micro_trends_for_user(
-            request.current_user_id, 
-            limit
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve latest trends"
         )
-        
-        # Convert to dict for JSON response
-        trends_data = []
-        for trend in micro_trends:
-            trend_dict = trend.dict()
-            trend_dict['analyzed_at'] = trend.analyzed_at.isoformat()
-            if trend.expires_at:
-                trend_dict['expires_at'] = trend.expires_at.isoformat()
-            
-            trends_data.append(trend_dict)
-        
-        return jsonify({
-            'micro_trends': trends_data,
-            'total_count': len(trends_data)
-        }), 200
-        
+
+@router.get("/micro-trends")
+async def get_micro_trends(
+    industry: str = Query(..., description="Industry to analyze"),
+    current_user: User = Depends(get_current_user),
+    engine: TrendAnalysisEngine = Depends(get_trend_analysis_engine)
+):
+    """Get micro-trends for specific industry"""
+    try:
+        trends = await engine.get_micro_trends(industry)
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "message": "Micro-trends retrieved successfully",
+                "industry": industry,
+                "trends": trends
+            }
+        )
     except Exception as e:
         logger.error(f"Failed to get micro-trends: {e}")
-        return jsonify({'error': 'Failed to retrieve micro-trends'}), 500
-
-@trends_bp.route('/search', methods=['GET'])
-@require_auth
-def search_trends():
-    """Search trends by keywords"""
-    try:
-        keywords = request.args.get('keywords', '').split(',')
-        keywords = [kw.strip() for kw in keywords if kw.strip()]
-        
-        if not keywords:
-            return jsonify({'error': 'Keywords parameter is required'}), 400
-        
-        limit = min(int(request.args.get('limit', 10)), 30)
-        
-        repository = get_trend_repository()
-        trends = repository.get_trends_by_keywords(
-            request.current_user_id,
-            keywords,
-            limit
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve micro-trends"
         )
-        
-        # Convert to dict for JSON response
-        trends_data = []
-        for trend in trends:
-            trend_dict = trend.dict()
-            trend_dict['analyzed_at'] = trend.analyzed_at.isoformat()
-            if trend.expires_at:
-                trend_dict['expires_at'] = trend.expires_at.isoformat()
-            
-            trends_data.append(trend_dict)
-        
-        return jsonify({
-            'trends': trends_data,
-            'search_keywords': keywords,
-            'total_count': len(trends_data)
-        }), 200
-        
-    except Exception as e:
-        logger.error(f"Failed to search trends: {e}")
-        return jsonify({'error': 'Failed to search trends'}), 500
 
-@trends_bp.route('/statistics', methods=['GET'])
-@require_auth
-def get_trend_statistics():
-    """Get trend analysis statistics for the current user"""
+@router.get("/search")
+async def search_trends(
+    query: str = Query(..., description="Search query"),
+    current_user: User = Depends(get_current_user),
+    repository: TrendAnalysisRepository = Depends(get_trend_repository)
+):
+    """Search for trends"""
     try:
-        days = min(int(request.args.get('days', 30)), 90)
-        
-        repository = get_trend_repository()
-        stats = repository.get_trend_statistics(request.current_user_id, days)
-        
-        return jsonify({
-            'statistics': stats,
-            'period_days': days,
-            'user_id': request.current_user_id
-        }), 200
-        
+        results = await repository.search_trends(query)
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "message": "Trend search completed successfully",
+                "query": query,
+                "results": results
+            }
+        )
+    except Exception as e:
+        logger.error(f"Trend search failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to search trends"
+        )
+
+@router.get("/statistics")
+async def get_trend_statistics(
+    current_user: User = Depends(get_current_user),
+    engine: TrendAnalysisEngine = Depends(get_trend_analysis_engine)
+):
+    """Get trend analysis statistics"""
+    try:
+        stats = await engine.get_statistics()
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "message": "Trend statistics retrieved successfully",
+                "statistics": stats
+            }
+        )
     except Exception as e:
         logger.error(f"Failed to get trend statistics: {e}")
-        return jsonify({'error': 'Failed to retrieve statistics'}), 500
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve trend statistics"
+        )
 
-@trends_bp.route('/<trend_id>', methods=['GET'])
-@require_auth
-def get_trend_details(trend_id: str):
+@router.get("/{trend_id}")
+async def get_trend_details(
+    trend_id: str = Path(..., description="Trend ID"),
+    current_user: User = Depends(get_current_user),
+    repository: TrendAnalysisRepository = Depends(get_trend_repository)
+):
     """Get detailed information about a specific trend"""
     try:
-        repository = get_trend_repository()
-        
-        # Get all trends for user and find the specific one
-        all_trends = repository.get_latest_trends_for_user(
-            request.current_user_id, 
-            limit=1000,  # Get all trends
-            include_expired=True
-        )
-        
-        trend = None
-        for t in all_trends:
-            if t.id == trend_id:
-                trend = t
-                break
-        
+        trend = await repository.get_trend_details(trend_id)
         if not trend:
-            return jsonify({'error': 'Trend not found'}), 404
-        
-        # Convert to dict for JSON response
-        trend_dict = trend.dict()
-        trend_dict['analyzed_at'] = trend.analyzed_at.isoformat()
-        if trend.expires_at:
-            trend_dict['expires_at'] = trend.expires_at.isoformat()
-        
-        return jsonify({'trend': trend_dict}), 200
-        
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Trend not found"
+            )
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "message": "Trend details retrieved successfully",
+                "trend": trend
+            }
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to get trend details: {e}")
-        return jsonify({'error': 'Failed to retrieve trend details'}), 500
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve trend details"
+        )
 
-# ==================== Configuration Operations ====================
-
-@trends_bp.route('/config', methods=['GET'])
-@require_auth
-def get_analysis_config():
-    """Get current trend analysis configuration"""
+@router.get("/config")
+async def get_analysis_config(
+    current_user: User = Depends(get_current_user),
+    engine: TrendAnalysisEngine = Depends(get_trend_analysis_engine)
+):
+    """Get trend analysis configuration"""
     try:
-        config = TrendAnalysisConfig()
-        
-        return jsonify({
-            'config': config.dict(),
-            'llm_available': current_app.config.get('ENABLE_LLM_INSIGHTS', False)
-        }), 200
-        
+        config = await engine.get_config()
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "message": "Analysis config retrieved successfully",
+                "config": config
+            }
+        )
     except Exception as e:
         logger.error(f"Failed to get analysis config: {e}")
-        return jsonify({'error': 'Failed to retrieve configuration'}), 500
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve analysis config"
+        )

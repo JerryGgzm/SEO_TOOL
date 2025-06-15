@@ -10,8 +10,9 @@ from datetime import datetime
 import logging
 
 from database import get_data_flow_manager, DataFlowManager
-from modules.twitter_api import TwitterAPIClient, get_twitter_client
-from modules.user_profile import UserProfileService, get_user_service
+from modules.twitter_api import TwitterAPIClient
+from api.middleware import get_twitter_client
+from api.middleware import get_user_service
 from api.middleware import get_current_user, User
 
 from modules.scheduling_posting.service import SchedulingPostingService
@@ -29,7 +30,7 @@ router = APIRouter(prefix="/api/scheduling", tags=["scheduling-posting"])
 async def get_scheduling_service(
     data_flow_manager: DataFlowManager = Depends(get_data_flow_manager),
     twitter_client: TwitterAPIClient = Depends(get_twitter_client),
-    user_service: UserProfileService = Depends(get_user_service),
+    user_service: get_user_service = Depends(get_user_service),
     current_user: User = Depends(get_current_user)
 ) -> SchedulingPostingService:
     """Get scheduling posting service with dependencies"""

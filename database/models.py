@@ -147,30 +147,26 @@ class Product(Base):
 # ====================
 
 class TwitterCredential(Base):
-    """Twitter credentials table - stores encrypted OAuth tokens"""
-    __tablename__ = 'twitter_credentials'
+    """Twitter凭证模型"""
+    __tablename__ = "twitter_credentials"
     
-    founder_id = Column(UUID(), ForeignKey('founders.id'), primary_key=True)
-    twitter_user_id = Column(String(50), nullable=False, index=True, comment="Twitter numeric user ID")
-    screen_name = Column(String(50), nullable=False, comment="Twitter username")
-    encrypted_access_token = Column(Text, nullable=False, comment="AES encrypted access token")
-    encrypted_refresh_token = Column(Text, comment="AES encrypted refresh token")
-    token_expires_at = Column(TIMESTAMP(timezone=True), comment="Access token expiration")
-    last_validated_at = Column(TIMESTAMP(timezone=True), default=func.now())
-    created_at = Column(TIMESTAMP(timezone=True), default=func.now())
-    updated_at = Column(TIMESTAMP(timezone=True), default=func.now(), onupdate=func.now())
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    access_token = Column(String(255), nullable=False)
+    refresh_token = Column(String(255))
+    token_type = Column(String(50), default="Bearer")
+    expires_at = Column(DateTime)
+    scope = Column(String(255))
+    twitter_user_id = Column(String(50))
+    twitter_username = Column(String(50))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # Relationships
-    founder = relationship("Founder", back_populates="twitter_credentials")
-    
-    def __repr__(self):
-        return f"<TwitterCredential(founder_id={self.founder_id}, screen_name={self.screen_name})>"
-    
-    def is_token_expired(self) -> bool:
-        """Check if access token is expired"""
-        if not self.token_expires_at:
+    def is_expired(self) -> bool:
+        """检查令牌是否过期"""
+        if not self.expires_at:
             return False
-        return datetime.utcnow() >= self.token_expires_at.replace(tzinfo=None)
+        return datetime.utcnow() >= self.expires_at
 
 # ====================
 # Trend Analysis Models

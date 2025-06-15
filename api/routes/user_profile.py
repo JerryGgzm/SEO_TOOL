@@ -1,254 +1,378 @@
-from flask import Flask, request, jsonify, session, redirect
-from flask_cors import CORS
-from typing import Dict, Any
-import jwt
+"""User Profile API Routes
+
+This module implements the FastAPI routes for user profile management,
+handling authentication, profile updates and Twitter integration.
+"""
+from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, Query, Path, status, Body
+from fastapi.responses import JSONResponse
+import logging
 from datetime import datetime, timedelta
+import jwt
 import os
+import secrets
+import base64
+import hashlib
+from urllib.parse import urlencode
+import requests
 
-# Initialize Flask application (this part is usually in the main application file)
-app = Flask(__name__)
-app.secret_key = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
-CORS(app)
+from database import get_data_flow_manager, DataFlowManager
+from api.middleware import get_current_user, User
 
-# Database session (should use dependency injection in actual applications)
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from modules.user_profile import UserProfileService, UserProfileRepository
+from modules.user_profile.service import UserProfileService
+from modules.user_profile.models import (
+    UserRegistration, UserLogin, ProductInfoData,
+    TwitterAuthResponse, TwitterStatus
+)
+from modules.twitter_api import TwitterAPIClient
 
-# Database configuration
-DATABASE_URL = os.getenv('DATABASE_URL', 'postgresql://user:password@localhost/ideation_db')
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+logger = logging.getLogger(__name__)
 
-def get_user_service() -> UserProfileService:
-    """Get user service instance"""
-    db_session = SessionLocal()
-    repository = UserProfileRepository(db_session)
-    return UserProfileService(repository)
+# Create router
+router = APIRouter(prefix="/api/user", tags=["user-profile"])
+
+# JWT configuration
+JWT_SECRET = os.getenv("SECRET_KEY", "your-secret-key-here")  # 使用环境变量
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRATION = timedelta(days=1)
 
 def generate_jwt_token(user_id: str) -> str:
-    """Generate JWT token"""
+    """Generate JWT token for user"""
     payload = {
-        'user_id': user_id,
-        'exp': datetime.utcnow() + timedelta(hours=24),
-        'iat': datetime.utcnow()
+        "user_id": user_id,
+        "exp": datetime.utcnow() + JWT_EXPIRATION
     }
-    return jwt.encode(payload, app.secret_key, algorithm='HS256')
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 def verify_jwt_token(token: str) -> Dict[str, Any]:
-    """Verify JWT token"""
+    """Verify and decode JWT token"""
     try:
-        payload = jwt.decode(token, app.secret_key, algorithms=['HS256'])
-        return payload
+        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
     except jwt.ExpiredSignatureError:
-        return {'error': 'Token has expired'}
-    except jwt.InvalidTokenError:
-        return {'error': 'Invalid token'}
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired"
+        )
+    except jwt.JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token"
+        )
 
-def require_auth(f):
-    """Authentication decorator"""
-    def decorated_function(*args, **kwargs):
-        token = request.headers.get('Authorization')
-        if not token:
-            return jsonify({'error': 'Missing authentication token'}), 401
-        
-        if token.startswith('Bearer '):
-            token = token[7:]
-        
-        payload = verify_jwt_token(token)
-        if 'error' in payload:
-            return jsonify({'error': payload['error']}), 401
-        
-        request.current_user_id = payload['user_id']
-        return f(*args, **kwargs)
-    
-    decorated_function.__name__ = f.__name__
-    return decorated_function
-
-# API route definitions
-
-@app.route('/auth/register', methods=['POST'])
-def register():
-    """User registration"""
+@router.post("/register")
+async def register(
+    registration: UserRegistration = Body(...),
+    data_flow_manager: DataFlowManager = Depends(get_data_flow_manager)
+):
+    """Register a new user"""
     try:
-        from modules.user_profile.models import UserRegistrationRequest
+        service = UserProfileService(data_flow_manager)
+        user = await service.register_user(registration)
         
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'Request data is empty'}), 400
+        # Generate JWT token
+        token = generate_jwt_token(user.id)
         
-        # Validate input data
-        try:
-            user_data = UserRegistrationRequest(**data)
-        except Exception as e:
-            return jsonify({'error': f'Input data validation failed: {str(e)}'}), 400
-        
-        # Register user
-        service = get_user_service()
-        success, result = service.register_user(user_data)
-        
-        if success:
-            # Generate JWT token
-            token = generate_jwt_token(result)
-            return jsonify({
-                'message': 'Registration successful',
-                'user_id': result,
-                'token': token
-            }), 201
-        else:
-            return jsonify({'error': result}), 400
-            
+        return JSONResponse(
+            status_code=status.HTTP_201_CREATED,
+            content={
+                "message": "User registered successfully",
+                "user_id": user.id,
+                "token": token
+            }
+        )
     except Exception as e:
-        return jsonify({'error': f'Registration failed: {str(e)}'}), 500
+        logger.error(f"Registration failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Registration failed"
+        )
 
-@app.route('/auth/login', methods=['POST'])
-def login():
-    """User login"""
+@router.post("/login")
+async def login(
+    login_data: UserLogin = Body(...),
+    data_flow_manager: DataFlowManager = Depends(get_data_flow_manager)
+):
+    """Login user"""
     try:
-        from modules.user_profile.models import UserLoginRequest
+        service = UserProfileService(data_flow_manager)
+        user = await service.authenticate_user(login_data.email, login_data.password)
         
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'Request data is empty'}), 400
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid credentials"
+            )
         
-        # Validate input data
-        try:
-            login_data = UserLoginRequest(**data)
-        except Exception as e:
-            return jsonify({'error': f'Input data validation failed: {str(e)}'}), 400
+        # Generate JWT token
+        token = generate_jwt_token(user.id)
         
-        # User authentication
-        service = get_user_service()
-        user_id = service.authenticate_user(login_data)
-        
-        if user_id:
-            # Generate JWT token
-            token = generate_jwt_token(user_id)
-            return jsonify({
-                'message': 'Login successful',
-                'user_id': user_id,
-                'token': token
-            }), 200
-        else:
-            return jsonify({'error': 'Incorrect email or password'}), 401
-            
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "message": "Login successful",
+                "user_id": user.id,
+                "token": token
+            }
+        )
+    except HTTPException:
+        raise
     except Exception as e:
-        return jsonify({'error': f'Login failed: {str(e)}'}), 500
+        logger.error(f"Login failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Login failed"
+        )
 
-@app.route('/profile', methods=['GET'])
-@require_auth
-def get_profile():
-    """Get current user profile"""
+@router.get("/profile")
+async def get_profile(
+    current_user: User = Depends(get_current_user),
+    data_flow_manager: DataFlowManager = Depends(get_data_flow_manager)
+):
+    """Get user profile"""
     try:
-        service = get_user_service()
-        user_profile = service.get_user_profile(request.current_user_id)
-        
-        if user_profile:
-            return jsonify(user_profile.dict()), 200
-        else:
-            return jsonify({'error': 'User does not exist'}), 404
-            
+        service = UserProfileService(data_flow_manager)
+        profile = await service.get_user_profile(current_user.id)
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "message": "Profile retrieved successfully",
+                "profile": profile
+            }
+        )
     except Exception as e:
-        return jsonify({'error': f'Failed to get user information: {str(e)}'}), 500
+        logger.error(f"Failed to get profile: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve profile"
+        )
 
-@app.route('/profile/product', methods=['PUT'])
-@require_auth  
-def update_product_info():
+@router.put("/profile/product")
+async def update_product_info(
+    product_info: ProductInfoData = Body(...),
+    current_user: User = Depends(get_current_user),
+    data_flow_manager: DataFlowManager = Depends(get_data_flow_manager)
+):
     """Update product information"""
     try:
-        from modules.user_profile.models import ProductInfoData
+        service = UserProfileService(data_flow_manager)
+        success = await service.update_product_info(current_user.id, product_info)
         
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'Request data is empty'}), 400
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to update product info"
+            )
         
-        # Validate product information data
-        try:
-            product_info = ProductInfoData(**data)
-        except Exception as e:
-            return jsonify({'error': f'Product information validation failed: {str(e)}'}), 400
-        
-        # Update product information
-        service = get_user_service()
-        success = service.update_product_info(request.current_user_id, product_info)
-        
-        if success:
-            return jsonify({'message': 'Product information updated successfully'}), 200
-        else:
-            return jsonify({'error': 'Product information update failed'}), 500
-            
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "message": "Product information updated successfully",
+                "product_info": product_info
+            }
+        )
+    except HTTPException:
+        raise
     except Exception as e:
-        return jsonify({'error': f'Failed to update product information: {str(e)}'}), 500
+        logger.error(f"Failed to update product info: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update product information"
+        )
 
-@app.route('/profile/product', methods=['GET'])
-@require_auth
-def get_product_info():
+@router.get("/profile/product")
+async def get_product_info(
+    current_user: User = Depends(get_current_user),
+    data_flow_manager: DataFlowManager = Depends(get_data_flow_manager)
+):
     """Get product information"""
     try:
-        service = get_user_service()
-        product_info = service.get_product_info(request.current_user_id)
+        service = UserProfileService(data_flow_manager)
+        product_info = await service.get_product_info(current_user.id)
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "message": "Product information retrieved successfully",
+                "product_info": product_info
+            }
+        )
+    except Exception as e:
+        logger.error(f"Failed to get product info: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve product information"
+        )
+
+@router.get("/profile/twitter/status")
+async def get_twitter_status(
+    current_user: User = Depends(get_current_user),
+    data_flow_manager: DataFlowManager = Depends(get_data_flow_manager)
+):
+    """获取Twitter连接状态"""
+    try:
+        # 从数据库获取Twitter凭证
+        from modules.user_profile.repository import UserProfileRepository
+        repository = UserProfileRepository(data_flow_manager.db_session)
+        service = UserProfileService(repository, data_flow_manager)
+        credentials = service.repository.get_twitter_credentials(current_user.id)
         
-        if product_info:
-            return jsonify(product_info.dict()), 200
-        else:
-            return jsonify({'error': 'Product information not found'}), 404
+        if not credentials:
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={
+                    "connected": False,
+                    "has_valid_token": False,
+                    "message": "Twitter账户未连接"
+                }
+            )
             
-    except Exception as e:
-        return jsonify({'error': f'Failed to get product information: {str(e)}'}), 500
-
-@app.route('/twitter/auth_url', methods=['GET'])
-@require_auth
-def get_twitter_auth_url():
-    """Get Twitter OAuth authorization URL"""
-    try:
-        service = get_user_service()
-        auth_url, state = service.get_twitter_auth_url(request.current_user_id)
+        # 检查令牌是否过期
+        is_expired = credentials.is_expired()
         
-        return jsonify({
-            'auth_url': auth_url,
-            'state': state
-        }), 200
-        
-    except Exception as e:
-        return jsonify({'error': f'Failed to get Twitter authorization URL: {str(e)}'}), 500
-
-@app.route('/twitter/callback', methods=['POST'])
-def twitter_callback():
-    """Handle Twitter OAuth callback"""
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'Request data is empty'}), 400
-        
-        code = data.get('code')
-        state = data.get('state')
-        
-        if not code or not state:
-            return jsonify({'error': 'Missing required parameters'}), 400
-        
-        service = get_user_service()
-        success, message = service.handle_twitter_callback(code, state)
-        
-        if success:
-            return jsonify({'message': message}), 200
+        # 如果令牌未过期，验证令牌有效性
+        if not is_expired:
+            try:
+                # 使用Twitter API验证令牌
+                twitter_client = TwitterAPIClient(
+                    client_id=os.getenv('TWITTER_CLIENT_ID'),
+                    client_secret=os.getenv('TWITTER_CLIENT_SECRET')
+                )
+                is_valid = twitter_client.auth.validate_user_token(credentials.access_token)
+            except Exception as e:
+                is_valid = False
+                logger.error(f"验证Twitter令牌失败: {e}")
         else:
-            return jsonify({'error': message}), 400
+            is_valid = False
             
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "connected": True,
+                "has_valid_token": is_valid,
+                "twitter_username": credentials.twitter_username,
+                "expires_at": credentials.expires_at.isoformat() if credentials.expires_at else None,
+                "message": "Twitter账户已连接" if is_valid else "Twitter令牌已过期"
+            }
+        )
+        
     except Exception as e:
-        return jsonify({'error': f'Failed to handle Twitter callback: {str(e)}'}), 500
+        logger.error(f"获取Twitter状态失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取Twitter状态失败"
+        )
 
-@app.route('/twitter/status', methods=['GET'])
-@require_auth
-def get_twitter_status():
-    """Get Twitter connection status"""
+@router.get("/profile/twitter/auth_url")
+async def get_twitter_auth_url(
+    current_user: User = Depends(get_current_user),
+    data_flow_manager: DataFlowManager = Depends(get_data_flow_manager)
+):
+    """获取Twitter授权URL"""
     try:
-        service = get_user_service()
-        access_token = service.get_twitter_access_token(request.current_user_id)
+        from modules.user_profile.repository import UserProfileRepository
+        repository = UserProfileRepository(data_flow_manager.db_session)
+        service = UserProfileService(repository, data_flow_manager)
+        auth_url, state, code_verifier = service.get_twitter_auth_url(current_user.id)
         
-        return jsonify({
-            'connected': access_token is not None,
-            'has_valid_token': access_token is not None
-        }), 200
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "auth_url": auth_url,
+                "state": state,
+                "code_verifier": code_verifier
+            }
+        )
+    except Exception as e:
+        logger.error(f"获取Twitter授权URL失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取Twitter授权URL失败: {str(e)}"
+        )
+
+@router.post("/profile/twitter/callback")
+async def twitter_callback(
+    code: str = Body(...),
+    state: str = Body(...),
+    data_flow_manager: DataFlowManager = Depends(get_data_flow_manager)
+):
+    """处理Twitter OAuth回调"""
+    try:
+        from modules.user_profile.repository import UserProfileRepository
+        repository = UserProfileRepository(data_flow_manager.db_session)
+        service = UserProfileService(repository, data_flow_manager)
+        token_info = service.handle_twitter_callback(code, state)
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "message": "Twitter账户连接成功",
+                "twitter_username": token_info.get("twitter_username")
+            }
+        )
         
     except Exception as e:
-        return jsonify({'error': f'Failed to get Twitter status: {str(e)}'}), 500
+        logger.error(f"处理Twitter回调失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"处理Twitter回调失败: {str(e)}"
+        )
+
+@router.post("/profile/twitter/refresh")
+async def refresh_twitter_token(
+    current_user: User = Depends(get_current_user),
+    data_flow_manager: DataFlowManager = Depends(get_data_flow_manager)
+):
+    """刷新Twitter访问令牌"""
+    try:
+        service = UserProfileService(data_flow_manager)
+        token_info = service.refresh_twitter_token(current_user.id)
+        
+        if not token_info:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="无法刷新Twitter令牌，请重新授权"
+            )
+            
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "message": "Twitter令牌刷新成功",
+                "expires_at": token_info["expires_at"].isoformat()
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"刷新Twitter令牌失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"刷新Twitter令牌失败: {str(e)}"
+        )
+
+@router.post("/profile/twitter/revoke")
+async def revoke_twitter_token(
+    current_user: User = Depends(get_current_user),
+    data_flow_manager: DataFlowManager = Depends(get_data_flow_manager)
+):
+    """撤销Twitter访问令牌"""
+    try:
+        service = UserProfileService(data_flow_manager)
+        success = service.revoke_twitter_token(current_user.id)
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="撤销Twitter令牌失败"
+            )
+            
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "message": "Twitter令牌已撤销"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"撤销Twitter令牌失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"撤销Twitter令牌失败: {str(e)}"
+        )

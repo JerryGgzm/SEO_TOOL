@@ -79,3 +79,16 @@ DETAIL:  Key (id)=(7e7af35b-ed46-4b86-9750-dd4963d06ab8) is still referenced fro
 2025-05-28 17:14:10,435 - INFO - Database Setup Manager initialized
 2025-05-28 17:14:10,436 - INFO - Database URL: postgresql://postgres:****@localhost:5432/ideation_db
 2025-05-28 17:14:10,448 - INFO - Database connection initialized
+2025-06-14 19:41:26,661 - INFO - Database Setup Manager initialized
+2025-06-14 19:41:26,661 - INFO - Database URL: postgresql://postgres:****@localhost:5432/ideation_db
+2025-06-14 19:41:26,725 - INFO - Database connection initialized
+2025-06-14 19:41:30,836 - ERROR - Database creation failed: (psycopg2.OperationalError) connection to server at "localhost" (::1), port 5432 failed: Connection refused (0x0000274D/10061)
+	Is the server running on that host and accepting TCP/IP connections?
+connection to server at "localhost" (127.0.0.1), port 5432 failed: Connection refused (0x0000274D/10061)
+	Is the server running on that host and accepting TCP/IP connections?
+
+(Background on this error at: https://sqlalche.me/e/20/e3q8)
+2025-06-14 19:41:57,395 - INFO - Database Setup Manager initialized
+2025-06-14 19:41:57,396 - INFO - Database URL: sqlite:///./test.db
+2025-06-14 19:41:57,407 - INFO - Database connection initialized
+2025-06-14 19:41:57,423 - ERROR - Database creation failed: Foreign key associated with column 'twitter_credentials.user_id' could not find table 'users' with which to generate a foreign key to target column 'id'

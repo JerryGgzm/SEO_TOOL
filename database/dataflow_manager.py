@@ -6,6 +6,14 @@ from sqlalchemy import and_, or_
 from sqlalchemy.sql import func
 import json
 import uuid
+import base64
+import secrets
+import hashlib
+import os
+import requests
+from urllib.parse import urlencode
+import time
+from requests.auth import HTTPBasicAuth
 
 from .repositories import (
     FounderRepository, ProductRepository, TrendRepository, 
@@ -25,6 +33,7 @@ class DataFlowManager:
     
     def __init__(self, db_session: Session):
         self.db_session = db_session
+        self._code_verifiers = {}  # 临时存储code_verifier
         
         # Initialize repositories
         self.founder_repo = FounderRepository(db_session)
@@ -1661,6 +1670,129 @@ class DataFlowManager:
         except Exception as e:
             logger.error(f"Failed to get content drafts by status: {e}")
             return []
+    
+    async def get_twitter_auth_url(self, user_id: str) -> Tuple[str, str]:
+        """获取Twitter授权URL"""
+        try:
+            # Validate required environment variables
+            client_id = os.getenv("TWITTER_CLIENT_ID")
+            if not client_id:
+                raise ValueError("TWITTER_CLIENT_ID is required")
+                
+            # Generate PKCE parameters
+            code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode('utf-8').rstrip('=')
+            code_challenge = base64.urlsafe_b64encode(
+                hashlib.sha256(code_verifier.encode('utf-8')).digest()
+            ).decode('utf-8').rstrip('=')
+            
+            # Generate state parameter
+            state = secrets.token_urlsafe(32)
+            
+            # Store code_verifier with user context and expiration
+            self._code_verifiers[state] = {
+                'code_verifier': code_verifier,
+                'user_id': user_id,
+                'expires_at': time.time() + 600  # 10 minutes
+            }
+            
+            # Clean up expired verifiers
+            self._cleanup_expired_verifiers()
+            
+            redirect_uri = os.getenv("TWITTER_REDIRECT_URI", "http://localhost:8000/api/user/profile/twitter/callback")
+            
+            auth_params = {
+                'response_type': 'code',
+                'client_id': client_id,
+                'redirect_uri': redirect_uri,
+                'scope': 'tweet.read tweet.write users.read offline.access',
+                'state': state,
+                'code_challenge': code_challenge,
+                'code_challenge_method': 'S256'
+            }
+            
+            auth_url = f"https://x.com/i/oauth2/authorize?{urlencode(auth_params)}"
+            return auth_url, state
+            
+        except Exception as e:
+            # Log the error appropriately
+            raise Exception(f"Failed to generate Twitter auth URL: {str(e)}")
+            
+    async def handle_twitter_callback(self, code: str, state: str) -> Dict[str, Any]:
+        """处理Twitter OAuth回调"""
+        try:
+            # 获取code_verifier
+            code_verifier_data = self._code_verifiers.get(state)
+            if not code_verifier_data:
+                raise ValueError("Invalid state parameter")
+            
+            code_verifier = code_verifier_data['code_verifier']
+                
+            # 交换访问令牌
+            client_id = os.getenv("TWITTER_CLIENT_ID")
+            client_secret = os.getenv("TWITTER_CLIENT_SECRET")
+            redirect_uri = os.getenv("TWITTER_REDIRECT_URI", "http://localhost:8000/api/user/profile/twitter/callback")
+            
+            token_url = "https://api.x.com/2/oauth2/token"
+            token_data = {
+                'grant_type': 'authorization_code',
+                'client_id': client_id,
+                'code': code,
+                'redirect_uri': redirect_uri,
+                'code_verifier': code_verifier
+            }
+            
+            response = requests.post(
+                token_url,
+                headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                data=token_data,
+                auth=HTTPBasicAuth(client_id, client_secret)
+            )
+            response.raise_for_status()
+            token_info = response.json()
+            
+            # 获取用户信息
+            user_info = requests.get(
+                "https://api.x.com/2/users/me",
+                headers={"Authorization": f"Bearer {token_info['access_token']}"}
+            ).json()
+            
+            # 清理code_verifier
+            self._code_verifiers.pop(state, None)
+            
+            return {
+                "access_token": token_info["access_token"],
+                "refresh_token": token_info.get("refresh_token"),
+                "expires_at": datetime.now() + timedelta(seconds=token_info.get("expires_in", 7200)),
+                "twitter_user_id": user_info.get("data", {}).get("id"),
+                "twitter_username": user_info.get("data", {}).get("username")
+            }
+            
+        except Exception as e:
+            logger.error(f"处理Twitter回调失败: {e}")
+            raise
+
+    def _cleanup_expired_verifiers(self):
+        """
+        清理过期的 code verifiers
+        
+        这个方法会检查所有存储的 verifiers，并删除那些已经过期的记录。
+        过期的定义是 expires_at 时间早于当前时间。
+        """
+        try:
+            current_time = time.time()
+            expired_states = [
+                state for state, data in self._code_verifiers.items()
+                if data['expires_at'] < current_time
+            ]
+            
+            for state in expired_states:
+                del self._code_verifiers[state]
+                
+            if expired_states:
+                logger.info(f"Cleaned up {len(expired_states)} expired code verifiers")
+                
+        except Exception as e:
+            logger.error(f"Failed to cleanup expired verifiers: {e}")
 
 
 class DataFlowManagerSEOExtensions:
