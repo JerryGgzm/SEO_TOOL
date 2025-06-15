@@ -10,31 +10,54 @@ This module provides:
 
 Main Components:
 - models.py: Data models for review items
-- repository.py: Database operations
+- database_adapter.py: Database operations adapter
 - service.py: Business logic
 - api.py: REST API endpoints
-- frontend/: UI components
 """
 
 from .models import (
-    ReviewItem,
-    ReviewStatus,
-    ReviewAction,
+    ReviewDecision,
+    DraftStatus,
+    ContentPriority,
     ReviewFeedback,
     ContentEdit,
-    ReviewStatistics
+    ReviewDecisionRequest,
+    BatchReviewRequest,
+    BatchReviewDecision,
+    ContentRegenerationRequest,
+    StatusUpdateRequest,
+    ContentDraftReview,
+    ReviewHistoryItem,
+    ReviewSummary,
+    ReviewAnalytics,
+    RegenerationResult,
+    ReviewQueue,
+    ReviewPreferences,
+    ContentComparisonResult
 )
 
 from .service import ReviewOptimizationService
-from .repository import ReviewOptimizationRepository
+from .database_adapter import ReviewOptimizationDatabaseAdapter
 
 __all__ = [
-    'ReviewItem',
-    'ReviewStatus',
-    'ReviewAction',
+    'ReviewDecision',
+    'DraftStatus',
+    'ContentPriority',
     'ReviewFeedback',
     'ContentEdit',
-    'ReviewStatistics',
+    'ReviewDecisionRequest',
+    'BatchReviewRequest',
+    'BatchReviewDecision',
+    'ContentRegenerationRequest',
+    'StatusUpdateRequest',
+    'ContentDraftReview',
+    'ReviewHistoryItem',
+    'ReviewSummary',
+    'ReviewAnalytics',
+    'RegenerationResult',
+    'ReviewQueue',
+    'ReviewPreferences',
+    'ContentComparisonResult',
     'ReviewOptimizationService',
-    'ReviewOptimizationRepository'
+    'ReviewOptimizationDatabaseAdapter'
 ]

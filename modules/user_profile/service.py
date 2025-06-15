@@ -1,5 +1,5 @@
 """User profile service logic""" 
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 import requests
 from requests_oauthlib import OAuth2Session
 from urllib.parse import urlencode
@@ -10,7 +10,9 @@ from datetime import datetime, timedelta
 import os
 
 from .repository import UserProfileRepository
-from .models import UserProfileData, ProductInfoData, TwitterCredentials, UserRegistrationRequest, UserLoginRequest
+from .models import UserProfileData, ProductInfoData, TwitterCredentials, UserRegistration, UserLogin
+from database.dataflow_manager import DataFlowManager
+from modules.twitter_api import TwitterAPIClient
 
 class TwitterOAuthError(Exception):
     """Twitter OAuth related exception"""
@@ -19,16 +21,17 @@ class TwitterOAuthError(Exception):
 class UserProfileService:
     """User profile service"""
     
-    def __init__(self, repository: UserProfileRepository):
+    def __init__(self, repository: UserProfileRepository, data_flow_manager: DataFlowManager):
         self.repository = repository
+        self.data_flow_manager = data_flow_manager
         self.twitter_client_id = os.getenv('TWITTER_CLIENT_ID')
         self.twitter_client_secret = os.getenv('TWITTER_CLIENT_SECRET')
-        self.twitter_redirect_uri = os.getenv('TWITTER_REDIRECT_URI', 'http://localhost:8000/auth/twitter/callback')
+        self.twitter_redirect_uri = os.getenv('TWITTER_REDIRECT_URI', 'http://localhost:8000/api/user/profile/twitter/callback')
         
         if not self.twitter_client_id or not self.twitter_client_secret:
             raise ValueError("Twitter API credentials not configured")
     
-    def register_user(self, user_data: UserRegistrationRequest) -> Tuple[bool, Optional[str]]:
+    def register_user(self, user_data: UserRegistration) -> Tuple[bool, Optional[str]]:
         """User registration"""
         # Check if email already exists
         existing_user = self.repository.get_user_by_email(user_data.email)
@@ -41,7 +44,7 @@ class UserProfileService:
         else:
             return False, "Registration failed, username may already be taken"
     
-    def authenticate_user(self, login_data: UserLoginRequest) -> Optional[str]:
+    def authenticate_user(self, login_data: UserLogin) -> Optional[str]:
         """User authentication login"""
         return self.repository.verify_password(login_data.email, login_data.password)
     
@@ -58,200 +61,147 @@ class UserProfileService:
         """Update product information"""
         return self.repository.update_product_info(user_id, product_info)
     
-    def get_twitter_auth_url(self, user_id: str) -> Tuple[str, str]:
-        """Get Twitter OAuth authorization URL (using PKCE)"""
-        # Generate PKCE parameters
-        code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode('utf-8').rstrip('=')
-        code_challenge = base64.urlsafe_b64encode(
-            hashlib.sha256(code_verifier.encode('utf-8')).digest()
-        ).decode('utf-8').rstrip('=')
-        
-        # Generate state parameter for CSRF protection
-        state = secrets.token_urlsafe(32)
-        
-        # Build authorization URL
-        auth_params = {
-            'response_type': 'code',
-            'client_id': self.twitter_client_id,
-            'redirect_uri': self.twitter_redirect_uri,
-            'scope': 'tweet.read tweet.write users.read offline.access',
-            'state': f"{state}:{user_id}",  # Encode user_id into state
-            'code_challenge': code_challenge,
-            'code_challenge_method': 'S256'
-        }
-        
-        auth_url = f"https://twitter.com/i/oauth2/authorize?{urlencode(auth_params)}"
-        
-        # Temporarily store code_verifier (should use Redis or database in actual applications)
-        # Simplified handling here, should have expiration mechanism in practice
-        self._store_code_verifier(state, code_verifier)
-        
-        return auth_url, state
-    
-    def handle_twitter_callback(self, authorization_code: str, state: str) -> Tuple[bool, Optional[str]]:
-        """Handle Twitter OAuth callback"""
+    def get_twitter_auth_url(self, user_id: str) -> Tuple[str, str, str]:
+        """获取Twitter授权URL"""
         try:
-            # Validate state and extract user_id
-            if ':' not in state:
-                return False, "Invalid state parameter"
-            
-            state_token, user_id = state.split(':', 1)
-            code_verifier = self._get_code_verifier(state_token)
-            
-            if not code_verifier:
-                return False, "Invalid authorization state"
-            
-            # Get access token
-            token_data = self._exchange_code_for_token(authorization_code, code_verifier)
-            
-            if not token_data:
-                return False, "Failed to get access token"
-            
-            # Get user information
-            user_info = self._get_twitter_user_info(token_data['access_token'])
-            
-            # Create credentials object
-            expires_at = None
-            if 'expires_in' in token_data:
-                expires_at = datetime.utcnow() + timedelta(seconds=token_data['expires_in'])
-            
-            credentials = TwitterCredentials(
-                user_id=user_id,
-                access_token=token_data['access_token'],
-                refresh_token=token_data.get('refresh_token'),
-                expires_at=expires_at,
-                scope=token_data.get('scope'),
-                twitter_user_id=user_info.get('id'),
-                twitter_username=user_info.get('username')
+            twitter_client = TwitterAPIClient(
+                client_id=self.twitter_client_id,
+                client_secret=self.twitter_client_secret
             )
             
-            # Save credentials
-            success = self.repository.save_twitter_credentials(user_id, credentials)
+            # 生成授权URL和PKCE参数
+            auth_url, state, code_verifier = twitter_client.auth.get_authorization_url(
+                redirect_uri=self.twitter_redirect_uri,
+                scopes=['tweet.read', 'users.read', 'follows.read', 'follows.write', 'offline.access']
+            )
             
-            if success:
-                # Clean up temporarily stored code_verifier
-                self._remove_code_verifier(state_token)
-                return True, "Twitter account connected successfully"
-            else:
-                return False, "Failed to save Twitter credentials"
-                
+            # 存储code_verifier
+            self._store_code_verifier(state, code_verifier)
+            
+            return auth_url, state, code_verifier
+            
         except Exception as e:
-            print(f"Failed to handle Twitter callback: {e}")
-            return False, f"Failed to handle callback: {str(e)}"
+            raise TwitterOAuthError(f"Failed to generate Twitter auth URL: {str(e)}")
     
-    def get_twitter_access_token(self, user_id: str) -> Optional[str]:
-        """Get valid Twitter access token (auto refresh)"""
-        credentials = self.repository.get_twitter_credentials(user_id)
-        
-        if not credentials:
-            return None
-        
-        # Check if token is about to expire (refresh 5 minutes early)
-        if credentials.expires_at and credentials.expires_at <= datetime.utcnow() + timedelta(minutes=5):
-            if credentials.refresh_token:
-                # Try to refresh token
-                new_credentials = self._refresh_access_token(credentials)
-                if new_credentials:
-                    self.repository.save_twitter_credentials(user_id, new_credentials)
-                    return new_credentials.access_token
-                else:
-                    return None  # Refresh failed, need re-authorization
-        
-        return credentials.access_token
-    
-    def _exchange_code_for_token(self, authorization_code: str, code_verifier: str) -> Optional[dict]:
-        """Exchange authorization code for access token"""
-        token_url = "https://api.twitter.com/2/oauth2/token"
-        
-        token_data = {
-            'grant_type': 'authorization_code',
-            'client_id': self.twitter_client_id,
-            'code': authorization_code,
-            'redirect_uri': self.twitter_redirect_uri,
-            'code_verifier': code_verifier
-        }
-        
-        headers = {
-            'Content-Type': 'application/x-www-form-urlencoded'
-        }
-        
-        # Use Basic authentication
-        auth = (self.twitter_client_id, self.twitter_client_secret)
-        
+    def handle_twitter_callback(self, code: str, state: str) -> Dict[str, Any]:
+        """处理Twitter OAuth回调"""
         try:
-            response = requests.post(token_url, data=token_data, headers=headers, auth=auth)
-            response.raise_for_status()
-            return response.json()
-        except requests.RequestException as e:
-            print(f"Failed to get access token: {e}")
-            return None
+            # 获取code_verifier
+            code_verifier = self._get_code_verifier(state)
+            if not code_verifier:
+                raise TwitterOAuthError("Invalid state parameter")
+            
+            # 交换访问令牌
+            twitter_client = TwitterAPIClient(
+                client_id=self.twitter_client_id,
+                client_secret=self.twitter_client_secret
+            )
+            
+            token_info = twitter_client.auth.exchange_code_for_token(
+                code=code,
+                code_verifier=code_verifier,
+                redirect_uri=self.twitter_redirect_uri
+            )
+            
+            if not token_info:
+                raise TwitterOAuthError("Failed to exchange code for token")
+            
+            # 获取用户信息
+            user_info_response = requests.get(
+                "https://api.x.com/2/users/me",
+                headers={"Authorization": f"Bearer {token_info['access_token']}"}
+            )
+            user_info_response.raise_for_status()
+            user_info = user_info_response.json()
+            
+            # 清理code_verifier
+            self._remove_code_verifier(state)
+            
+            return {
+                "access_token": token_info["access_token"],
+                "refresh_token": token_info.get("refresh_token"),
+                "expires_at": datetime.utcnow() + timedelta(seconds=token_info.get("expires_in", 7200)),
+                "twitter_user_id": user_info.get("data", {}).get("id"),
+                "twitter_username": user_info.get("data", {}).get("username")
+            }
+            
+        except Exception as e:
+            raise TwitterOAuthError(f"Failed to handle Twitter callback: {str(e)}")
     
-    def _refresh_access_token(self, credentials: TwitterCredentials) -> Optional[TwitterCredentials]:
-        """Refresh access token"""
-        if not credentials.refresh_token:
-            return None
-        
-        token_url = "https://api.twitter.com/2/oauth2/token"
-        
-        token_data = {
-            'grant_type': 'refresh_token',
-            'refresh_token': credentials.refresh_token,
-            'client_id': self.twitter_client_id
-        }
-        
-        headers = {
-            'Content-Type': 'application/x-www-form-urlencoded'
-        }
-        
-        auth = (self.twitter_client_id, self.twitter_client_secret)
-        
+    def refresh_twitter_token(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """刷新Twitter访问令牌"""
         try:
-            response = requests.post(token_url, data=token_data, headers=headers, auth=auth)
-            response.raise_for_status()
-            token_data = response.json()
+            credentials = self.repository.get_twitter_credentials(user_id)
+            if not credentials or not credentials.refresh_token:
+                return None
             
-            # Update credentials
-            expires_at = None
-            if 'expires_in' in token_data:
-                expires_at = datetime.utcnow() + timedelta(seconds=token_data['expires_in'])
+            twitter_client = TwitterAPIClient(
+                client_id=self.twitter_client_id,
+                client_secret=self.twitter_client_secret
+            )
             
-            credentials.access_token = token_data['access_token']
-            credentials.refresh_token = token_data.get('refresh_token', credentials.refresh_token)
-            credentials.expires_at = expires_at
+            token_info = twitter_client.auth.refresh_token(credentials.refresh_token)
+            if not token_info:
+                return None
+            
+            # 更新凭证
+            credentials.access_token = token_info['access_token']
+            credentials.refresh_token = token_info.get('refresh_token', credentials.refresh_token)
+            credentials.expires_at = datetime.utcnow() + timedelta(seconds=token_info.get('expires_in', 7200))
             credentials.updated_at = datetime.utcnow()
             
-            return credentials
+            self.repository.save_twitter_credentials(user_id, credentials)
             
-        except requests.RequestException as e:
-            print(f"Failed to refresh access token: {e}")
+            return {
+                "access_token": credentials.access_token,
+                "refresh_token": credentials.refresh_token,
+                "expires_at": credentials.expires_at
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to refresh Twitter token: {e}")
             return None
     
-    def _get_twitter_user_info(self, access_token: str) -> dict:
-        """Get Twitter user information"""
-        url = "https://api.twitter.com/2/users/me"
-        headers = {
-            'Authorization': f'Bearer {access_token}'
-        }
-        
+    def revoke_twitter_token(self, user_id: str) -> bool:
+        """撤销Twitter访问令牌"""
         try:
-            response = requests.get(url, headers=headers)
-            response.raise_for_status()
-            return response.json().get('data', {})
-        except requests.RequestException as e:
-            print(f"Failed to get Twitter user information: {e}")
-            return {}
+            credentials = self.repository.get_twitter_credentials(user_id)
+            if not credentials:
+                return True
+            
+            twitter_client = TwitterAPIClient(
+                client_id=self.twitter_client_id,
+                client_secret=self.twitter_client_secret
+            )
+            
+            # 撤销访问令牌
+            if credentials.access_token:
+                twitter_client.auth.revoke_token(credentials.access_token)
+            
+            # 撤销刷新令牌
+            if credentials.refresh_token:
+                twitter_client.auth.revoke_token(credentials.refresh_token)
+            
+            # 删除凭证
+            self.repository.delete_twitter_credentials(user_id)
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to revoke Twitter token: {e}")
+            return False
     
-    # Simplified temporary storage implementation (should use Redis etc. in actual applications)
+    # 临时存储实现（实际应用中应使用Redis等）
     _code_verifiers = {}
     
     def _store_code_verifier(self, state: str, code_verifier: str):
-        """Temporarily store code_verifier"""
+        """临时存储code_verifier"""
         self._code_verifiers[state] = code_verifier
     
     def _get_code_verifier(self, state: str) -> Optional[str]:
-        """Get code_verifier"""
+        """获取code_verifier"""
         return self._code_verifiers.get(state)
     
     def _remove_code_verifier(self, state: str):
-        """Remove code_verifier"""
+        """删除code_verifier"""
         self._code_verifiers.pop(state, None)

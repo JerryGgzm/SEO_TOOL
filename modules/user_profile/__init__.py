@@ -21,9 +21,9 @@ from .models import (
     ProductInfoData, 
     ProductKeywords,
     TwitterCredentials,
-    UserRegistrationRequest,
-    UserLoginRequest,
-    ProductInfoUpdateRequest,
+    UserRegistration,
+    UserLogin,
+    ProductInfoUpdate,
     ContentStylePreferences,
     CompetitorInfo,
     InfluencerReference

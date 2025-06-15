@@ -8,7 +8,8 @@ psycopg2-binary==2.9.7
 alembic==1.12.1
 
 # Data Validation
-pydantic==2.7.4
+pydantic==2.5.2
+pydantic[email]
 email-validator==2.0.0
 
 # Authentication Related
@@ -81,3 +82,5 @@ celery==5.3.4
 
 # Other dependencies
 python-dotenv>=1.0.0
+
+ngrok==4.1.0

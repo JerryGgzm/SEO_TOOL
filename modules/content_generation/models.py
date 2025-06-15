@@ -15,7 +15,6 @@ class ContentType(str, Enum):
 class GenerationMode(str, Enum):
     """Content generation modes"""
     STANDARD = "standard"
-    SEO_OPTIMIZED = "seo_optimized"
     VIRAL_FOCUSED = "viral_focused"
     BRAND_FOCUSED = "brand_focused"
     TREND_BASED = "trend_based"
@@ -29,14 +28,6 @@ class BrandVoice(BaseModel):
     avoid_words: List[str] = Field(default=[], description="Words to avoid")
     preferred_phrases: List[str] = Field(default=[], description="Preferred expressions")
     formality_level: float = Field(default=0.5, ge=0, le=1, description="0=casual, 1=formal")
-
-class SEOSuggestions(BaseModel):
-    """SEO optimization suggestions"""
-    hashtags: List[str] = Field(default=[], description="Recommended hashtags")
-    keywords: List[str] = Field(default=[], description="Key terms to include")
-    mentions: List[str] = Field(default=[], description="Suggested @mentions")
-    trending_tags: List[str] = Field(default=[], description="Currently trending hashtags")
-    optimal_length: Optional[int] = Field(None, description="Recommended character count")
 
 class ContentGenerationContext(BaseModel):
     """Context for content generation"""
@@ -54,7 +45,6 @@ class ContentQualityScore(BaseModel):
     engagement_prediction: float = Field(..., ge=0, le=1, description="Predicted engagement")
     brand_alignment: float = Field(..., ge=0, le=1, description="Brand voice alignment")
     trend_relevance: float = Field(..., ge=0, le=1, description="Relevance to trend")
-    seo_optimization: float = Field(..., ge=0, le=1, description="SEO optimization score")
     readability: float = Field(..., ge=0, le=1, description="Content readability")
     issues: List[str] = Field(default=[], description="Identified issues")
     suggestions: List[str] = Field(default=[], description="Improvement suggestions")
@@ -66,7 +56,6 @@ class ContentDraft(BaseModel):
     content_type: ContentType = Field(..., description="Type of content")
     generated_text: str = Field(..., description="Generated content text")
     quality_score: float = Field(default=0.0, ge=0, le=1, description="Quality assessment score")
-    seo_suggestions: SEOSuggestions = Field(default_factory=SEOSuggestions)
     generation_metadata: Dict[str, Any] = Field(default={}, description="Generation metadata")
     created_at: datetime = Field(default_factory=datetime.now)
     
@@ -121,7 +110,6 @@ class ContentGenerationRequest(BaseModel):
     source_tweet_id: Optional[str] = Field(None, description="Tweet to reply to")
     custom_prompt: Optional[str] = Field(None, description="Custom generation prompt")
     quantity: int = Field(default=1, ge=1, le=10, description="Number of variations to generate")
-    include_seo: bool = Field(default=True, description="Include SEO optimization")
     quality_threshold: float = Field(default=0.6, ge=0, le=1, description="Minimum quality score")
 
 class LLMResponse(BaseModel):

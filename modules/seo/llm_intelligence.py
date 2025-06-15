@@ -643,8 +643,25 @@ Make each variation distinctly different while maintaining the core message.
         
         try:
             response = await self._call_llm(variation_prompt)
-            variations = json.loads(response)
-            return variations if isinstance(variations, list) else []
+            
+            if not response or response.strip() == '':
+                logger.warning("Empty response from LLM")
+                return [{'content': content, 'strategy': 'original', 'seo_focus': 'none'}]
+            
+            # Try to parse JSON response
+            try:
+                variations = json.loads(response)
+                return variations if isinstance(variations, list) else []
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse variation JSON: {e}")
+                logger.debug(f"Raw response: {response[:200]}...")
+                # Return fallback variations
+                return [
+                    {'content': content + " #innovation", 'strategy': 'hashtag-focused', 'seo_focus': 'discoverability'},
+                    {'content': content + " What do you think?", 'strategy': 'engagement-focused', 'seo_focus': 'interaction'},
+                    {'content': content + " Learn more!", 'strategy': 'action-focused', 'seo_focus': 'conversion'}
+                ]
+                
         except Exception as e:
             logger.error(f"Content variation generation failed: {e}")
             return [{'content': content, 'strategy': 'original', 'seo_focus': 'none'}]
@@ -653,6 +670,7 @@ Make each variation distinctly different while maintaining the core message.
         """Call LLM for analysis"""
         try:
             if not self.llm_client:
+                logger.warning("No LLM client available")
                 return None
             
             # Use the correct async method name
@@ -662,7 +680,8 @@ Make each variation distinctly different while maintaining the core message.
                     {
                         "role": "system",
                         "content": "You are an expert SEO analyst specializing in social media optimization. "
-                                 "Provide detailed, actionable insights in the requested JSON format."
+                                 "Provide detailed, actionable insights in valid JSON format only. "
+                                 "Do not include any text outside the JSON structure."
                     },
                     {"role": "user", "content": prompt}
                 ],
@@ -670,7 +689,22 @@ Make each variation distinctly different while maintaining the core message.
                 temperature=0.3
             )
             
-            return response.choices[0].message.content.strip()
+            content = response.choices[0].message.content
+            if content:
+                content = content.strip()
+                
+                # Remove any markdown code blocks if present
+                if content.startswith('```json'):
+                    content = content[7:]
+                if content.startswith('```'):
+                    content = content[3:]
+                if content.endswith('```'):
+                    content = content[:-3]
+                
+                return content.strip()
+            else:
+                logger.warning("Empty content from LLM response")
+                return None
             
         except Exception as e:
             logger.error(f"LLM analysis call failed: {e}")

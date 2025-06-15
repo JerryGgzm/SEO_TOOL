@@ -50,10 +50,10 @@ class BaseSEOOptimizer:
             }
         }
     
-    async def optimize_content(self, request: SEOOptimizationRequest, 
-                            context: SEOAnalysisContext = None) -> SEOOptimizationResult:
+    async def optimize_content_async(self, request: SEOOptimizationRequest, 
+                                   context: SEOAnalysisContext = None) -> SEOOptimizationResult:
         """
-        Optimize content based on request parameters
+        Async version of content optimization (base implementation)
         
         Args:
             request: SEO optimization request
@@ -63,65 +63,17 @@ class BaseSEOOptimizer:
             SEO optimization result
         """
         try:
-            # Extract content from request
-            original_content = request.content
-            
-            # Perform optimization
-            optimized_content = self._optimize_content_text(
-                original_content, 
-                request.content_type,
-                request.target_keywords,
-                context
-            )
-            
-            # Calculate optimization score
-            optimization_score = self._calculate_optimization_score(
-                original_content, optimized_content, request.target_keywords
-            )
-            
-            # Generate suggestions
-            suggestions = self._generate_optimization_suggestions(
-                original_content, request.content_type, context
-            )
-            
-            # Create improvement suggestions as strings
-            improvement_suggestions = [
-                "Added relevant hashtags for better discoverability",
-                "Integrated target keywords naturally",
-                "Optimized content structure for engagement",
-                "Enhanced call-to-action effectiveness"
-            ]
-            
-            # Create result object with correct types
-            return SEOOptimizationResult(
-                original_content=original_content,
-                optimized_content=optimized_content,
-                optimization_score=optimization_score,
-                improvements_made=improvement_suggestions,
-                hashtag_analysis=[],
-                keyword_analysis=[],
-                estimated_reach_improvement=15.0,
-                suggestions=suggestions
-            )
+            # For base class, just call the sync version
+            return self.optimize_content(request, context)
             
         except Exception as e:
-            logger.error(f"Content optimization failed: {str(e)}")
-            # Return safe fallback result
-            return SEOOptimizationResult(
-                original_content=request.content if hasattr(request, 'content') else "",
-                optimized_content=request.content if hasattr(request, 'content') else "",
-                optimization_score=0.5,
-                improvements_made=["Optimization failed - using original content"],
-                hashtag_analysis=[],
-                keyword_analysis=[],
-                estimated_reach_improvement=0.0,
-                suggestions=ContentOptimizationSuggestions()
-            )
+            logger.error(f"Async content optimization failed: {str(e)}")
+            return self._create_fallback_result(request)
 
     def optimize_content(self, request: SEOOptimizationRequest, 
                         context: SEOAnalysisContext = None) -> SEOOptimizationResult:
         """
-        Synchronous version of optimize_content for backward compatibility
+        Base implementation of content optimization
         """
         try:
             # Extract content from request
@@ -147,9 +99,10 @@ class BaseSEOOptimizer:
             
             # Create improvement suggestions as strings
             improvement_suggestions = [
-                "Added relevant hashtags for better discoverability",
+                "Applied base SEO optimization principles",
                 "Integrated target keywords naturally",
-                "Optimized content structure for engagement"
+                "Optimized content structure for engagement",
+                "Enhanced discoverability elements"
             ]
             
             # Create result object
@@ -161,22 +114,17 @@ class BaseSEOOptimizer:
                 hashtag_analysis=[],
                 keyword_analysis=[],
                 estimated_reach_improvement=15.0,
-                suggestions=suggestions
+                suggestions=suggestions,
+                optimization_metadata={
+                    'optimization_mode': 'base',
+                    'llm_enhanced': False,
+                    'timestamp': datetime.utcnow().isoformat()
+                }
             )
             
         except Exception as e:
             logger.error(f"Content optimization failed: {str(e)}")
-            # Return safe fallback result
-            return SEOOptimizationResult(
-                original_content=request.content if hasattr(request, 'content') else "",
-                optimized_content=request.content if hasattr(request, 'content') else "",
-                optimization_score=0.5,
-                improvements_made=["Optimization failed - using original content"],
-                hashtag_analysis=[],
-                keyword_analysis=[],
-                estimated_reach_improvement=0.0,
-                suggestions=ContentOptimizationSuggestions()
-            )
+            return self._create_fallback_result(request)
 
     def optimize_content_simple(self, content: str, content_type: SEOContentType, 
                               context: Dict[str, Any] = None) -> str:
@@ -609,14 +557,20 @@ class BaseSEOOptimizer:
     def _create_fallback_result(self, request: SEOOptimizationRequest) -> SEOOptimizationResult:
         """Create fallback result when optimization fails"""
         return SEOOptimizationResult(
-            original_content=request.content,
-            optimized_content=request.content,
+            original_content=request.content if hasattr(request, 'content') else "",
+            optimized_content=request.content if hasattr(request, 'content') else "",
             optimization_score=0.5,
-            improvements_made=["Optimization failed - content unchanged"],
-            suggestions=ContentOptimizationSuggestions(),
+            improvements_made=["Optimization failed - using original content"],
             hashtag_analysis=[],
             keyword_analysis=[],
-            estimated_reach_improvement=0.0
+            estimated_reach_improvement=0.0,
+            suggestions=ContentOptimizationSuggestions(),
+            optimization_metadata={
+                'optimization_mode': 'fallback',
+                'llm_enhanced': False,
+                'error': 'Optimization failed',
+                'timestamp': datetime.utcnow().isoformat()
+            }
         )
     
     # Public interface methods for integration with ContentGenerationModule

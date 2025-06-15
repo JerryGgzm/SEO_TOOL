@@ -1,4 +1,14 @@
-"""Enhanced demo script for ContentGenerationModule with SEO integration"""
+"""Demo script for ContentGenerationModule - Streamlined Content Generation
+
+This demo showcases the core content generation capabilities:
+- Pure content generation using LLM
+- Multiple generation modes (standard, viral-focused, brand-focused)
+- Quality assessment and validation
+- Content type handling (tweets, replies, threads)
+- Brand voice consistency
+
+Note: SEO optimization is demonstrated separately via the SEO module.
+"""
 import asyncio
 import os
 import sys
@@ -15,23 +25,12 @@ sys.path.insert(0, str(project_root))
 # Import content generation models and services
 from modules.content_generation.models import (
     ContentGenerationRequest, ContentGenerationContext, 
-    ContentType, BrandVoice, SEOSuggestions
+    ContentType, BrandVoice, GenerationMode
 )
 from modules.content_generation.generator import ContentGenerator, ContentGenerationFactory
 from modules.content_generation.service import ContentGenerationService
 from modules.content_generation.quality_checker import ContentQualityChecker
-
-# Import SEO components
-from modules.seo.optimizer import SEOOptimizer
-from modules.seo.service_integration import SEOService
-from modules.seo.models import (
-    SEOOptimizationRequest, SEOAnalysisContext, SEOContentType,
-    SEOOptimizationLevel, HashtagStrategy, ContentOptimizationSuggestions
-)
-
-# Import analytics components  
-from modules.analytics.collector import AnalyticsCollector
-from modules.analytics.processor import ContentPerformanceAnalyzer, SEOPerformanceAnalyzer
+from modules.content_generation.database_adapter import ContentGenerationDatabaseAdapter
 
 # Mock services for demo
 from unittest.mock import Mock, MagicMock
@@ -54,108 +53,6 @@ def get_openai_api_key() -> str:
     
     return api_key
 
-def get_twitter_credentials() -> Dict[str, str]:
-    """Get Twitter API credentials from environment variables"""
-    credentials = {
-        'client_id': os.getenv('TWITTER_CLIENT_ID'),
-        'client_secret': os.getenv('TWITTER_CLIENT_SECRET'),
-        'bearer_token': os.getenv('TWITTER_BEARER_TOKEN')
-    }
-    
-    missing = [key for key, value in credentials.items() if not value]
-    if missing:
-        print(f"⚠️ Missing Twitter credentials: {', '.join(missing)}")
-        print("💡 Please add to your .env file:")
-        for key in missing:
-            print(f"   {key.upper()}=your_{key}_here")
-    
-    return credentials
-
-class MockTwitterClient:
-    """Mock Twitter client for demo"""
-    def get_trends_for_location(self, access_token, location_id=1):
-        return [
-            {'name': '#AI', 'tweet_volume': 50000},
-            {'name': '#Innovation', 'tweet_volume': 30000},
-            {'name': '#Startup', 'tweet_volume': 25000},
-            {'name': '#Tech', 'tweet_volume': 40000},
-            {'name': '#Productivity', 'tweet_volume': 15000}
-        ]
-
-class MockUserProfileService:
-    """Mock user profile service for demo"""
-    def get_user_profile(self, user_id):
-        return MagicMock(
-            product_info={
-                'name': 'AI Productivity Assistant',
-                'description': 'Helps professionals manage tasks and workflows',
-                'core_values': ['efficiency', 'innovation', 'simplicity'],
-                'industry_category': 'productivity software',
-                'target_audience': 'busy professionals and entrepreneurs'
-            }
-        )
-    
-    def get_twitter_access_token(self, user_id):
-        return "mock_access_token"
-
-class MockDataFlowManager:
-    """Mock data flow manager with SEO integration"""
-    def __init__(self):
-        self.db_session = Mock()
-        self.content_repo = Mock()
-        self._seo_optimization_cache = []
-        
-    def get_content_generation_context(self, founder_id, trend_id=None):
-        return {
-            'products': [{
-                'name': 'AI Productivity Assistant',
-                'description': 'Helps professionals manage tasks and workflows',
-                'core_values': ['efficiency', 'innovation', 'simplicity'],
-                'target_audience': 'busy professionals and entrepreneurs',
-                'niche_definition': {'category': 'productivity software'}
-            }],
-            'founder_settings': {
-                'content_preferences': {
-                    'tone': 'professional',
-                    'style': 'helpful',
-                    'formality_level': 0.6
-                }
-            },
-            'trend_info': {
-                'topic_name': 'AI productivity tools',
-                'pain_points': ['information overload', 'task management', 'workflow efficiency'],
-                'questions': ['How to be more productive?', 'Best AI tools for work?'],
-                'keywords': ['ai', 'productivity', 'automation', 'efficiency']
-            },
-            'recent_topics': [],
-            'successful_content_patterns': []
-        }
-    
-    def store_generated_content_draft(self, draft_data):
-        # Simulate storing and return mock ID
-        return f"draft_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    
-    def store_seo_optimization_result(self, founder_id: str, optimization_data: dict) -> bool:
-        """Store SEO optimization results (mock implementation)"""
-        try:
-            record = {
-                'founder_id': founder_id,
-                'timestamp': datetime.now().isoformat(),
-                **optimization_data
-            }
-            self._seo_optimization_cache.append(record)
-            print(f"✅ Stored SEO optimization result: Score {optimization_data.get('seo_quality_score', 0):.2f}")
-            return True
-        except Exception as e:
-            print(f"❌ Failed to store SEO result: {e}")
-            return False
-    
-    def get_seo_performance_history(self, founder_id: str, days: int = 30) -> list:
-        """Get SEO performance history (mock implementation)"""
-        # Return cached results for demo
-        return [record for record in self._seo_optimization_cache 
-                if record.get('founder_id') == founder_id]
-
 def get_llm_client():
     """Get LLM client for demos"""
     try:
@@ -169,435 +66,479 @@ def get_llm_client():
         print(f"⚠️ Could not initialize LLM client: {e}")
         return None
 
-def create_mock_services():
-    """Create mock services for demo"""
-    # Mock Twitter client
-    twitter_client = Mock()
-    twitter_client.get_trending_hashtags.return_value = ['#AI', '#productivity', '#innovation']
+class MockDatabaseAdapter(ContentGenerationDatabaseAdapter):
+    """Mock database adapter for demo"""
     
-    # Mock User service with proper dictionary-like behavior
-    user_service = Mock()
-    
-    # Create a real dictionary for user profile (not a Mock)
-    mock_user_profile = {
-        'target_audience': 'tech entrepreneurs',
-        'niche_keywords': ['startup', 'innovation', 'technology'],
-        'industry_category': 'technology',
-        'core_values': ['innovation', 'efficiency'],
-        'product_categories': ['technology'],
-        'brand_voice': 'professional',
-        'founder_id': 'demo_founder',
-        'company_name': 'Demo Company',
-        'product_name': 'AI Productivity Suite',
-        'business_model': 'SaaS',
-        'stage': 'growth',
-        'location': 'San Francisco',
-        'website': 'https://demo.com',
-        'description': 'AI-powered productivity tools for developers'
-    }
-    
-    # Make the mock return the real dictionary
-    user_service.get_user_profile.return_value = mock_user_profile
-    
-    # Also handle get_founder_profile method if it exists
-    user_service.get_founder_profile.return_value = mock_user_profile
-    
-    # Mock data flow manager with proper methods
-    data_flow_manager = Mock()
-    data_flow_manager.get_seo_performance_history.return_value = []
-    data_flow_manager.store_seo_optimization_result = Mock()
-    
-    # Add content repository mock for content generation demo
-    mock_content_repo = Mock()
-    mock_content_repo.get_by_id.return_value = None  # Will be handled gracefully
-    mock_content_repo.save.return_value = "mock_draft_id_123"
-    data_flow_manager.content_repo = mock_content_repo
-    
-    # Add user repository mock
-    mock_user_repo = Mock()
-    mock_user_repo.get_by_id.return_value = mock_user_profile
-    data_flow_manager.user_repo = mock_user_repo
-    
-    return twitter_client, user_service, data_flow_manager
-
-def create_enhanced_seo_service(twitter_client, user_service, data_flow_manager, llm_client=None):
-    """Create enhanced SEO service for demo"""
-    try:
-        from modules.seo.service_integration import SEOService
+    def __init__(self):
+        self._drafts = {}
+        self._founder_profiles = {}
+        self._product_info = {}
+        self._content_preferences = {}
         
-        config = {
-            'llm_optimization_mode': 'hybrid',
-            'cache_duration_hours': 6,
-            'default_optimization_mode': 'hybrid'
+        # Setup demo data
+        self._setup_demo_data()
+    
+    def _setup_demo_data(self):
+        """Setup demo data"""
+        demo_founder_id = "demo_founder"
+        
+        self._founder_profiles[demo_founder_id] = {
+            'preferred_tone': 'professional',
+            'writing_style': 'informative',
+            'personality_traits': ['innovative', 'helpful', 'professional'],
+            'avoid_words': ['boring', 'complicated'],
+            'preferred_phrases': ['excited to share', 'looking forward'],
+            'formality_level': 0.6,
+            'target_audience': 'tech entrepreneurs and developers'
         }
         
-        return SEOService(
-            twitter_client=twitter_client,
-            user_service=user_service,
-            data_flow_manager=data_flow_manager,
-            llm_client=llm_client,
-            config=config
-        )
-    except Exception as e:
-        print(f"⚠️ Could not create enhanced SEO service: {e}")
-        return None
-
-def demo_seo_configuration():
-    """Demo SEO configuration and setup"""
-    print("\n⚙️ Demo: SEO Configuration")
-    
-    print("🔧 SEO Module Configuration:")
-    print("✅ Enhanced SEO Optimizer with LLM integration")
-    print("✅ Multiple optimization modes: traditional, hybrid, intelligent")
-    print("✅ Content type support: tweets, posts, articles")
-    print("✅ Hashtag and keyword optimization")
-    print("✅ Real-time trend analysis")
-    
-    # Check LLM availability
-    llm_client = get_llm_client()
-    if llm_client:
-        print("✅ LLM client configured for intelligent optimization")
-    else:
-        print("⚠️ LLM client not available - using traditional optimization")
-
-async def demo_basic_seo_content_generation():
-    """Demo basic SEO-enhanced content generation"""
-    print("\n📝 Demo: Basic SEO Content Generation")
-    
-    try:
-        # Create mock services
-        twitter_client, user_service, data_flow_manager = create_mock_services()
-        llm_client = get_llm_client()
-        
-        # Create SEO service
-        seo_service = create_enhanced_seo_service(
-            twitter_client, user_service, data_flow_manager, llm_client
-        )
-        
-        if not seo_service:
-            print("❌ Could not create SEO service")
-            return
-        
-        print("🔧 Testing SEO content suggestions...")
-        
-        # Test content suggestions
-        trend_info = {
-            'topic_name': 'AI productivity tools',
-            'keywords': ['ai', 'productivity', 'automation']
+        self._product_info[demo_founder_id] = {
+            'name': 'AI Productivity Assistant',
+            'description': 'AI-powered tools that help professionals manage tasks and workflows efficiently',
+            'industry': 'productivity software',
+            'target_market': 'busy professionals and entrepreneurs'
         }
         
-        product_info = {
-            'target_audience': 'software developers',
-            'core_values': ['efficiency', 'innovation'],
-            'industry_category': 'technology'
+        self._content_preferences[demo_founder_id] = {
+            'preferred_content_types': ['tweet', 'thread'],
+            'posting_frequency': 'daily',
+            'engagement_style': 'conversational'
         }
-        
-        try:
-            suggestions = await seo_service.get_content_suggestions(
-                trend_info=trend_info,
-                product_info=product_info,
-                content_type='tweet'
-            )
-            
-            print(f"🏷️ Recommended Hashtags: {', '.join(suggestions.recommended_hashtags[:5])}")
-            print(f"🔑 Primary Keywords: {', '.join(suggestions.primary_keywords[:3])}")
-            print(f"📏 Optimal Length: {suggestions.optimal_length}")
-            print(f"💬 Call to Action: {suggestions.call_to_action}")
-            
-        except Exception as e:
-            print(f"⚠️ SEO suggestions failed: {e}")
-        
-        print("\n✅ Basic SEO content generation demo completed!")
-        
-    except Exception as e:
-        print(f"❌ Basic SEO demo failed: {e}")
+    
+    async def get_founder_profile(self, founder_id: str) -> Dict[str, Any]:
+        return self._founder_profiles.get(founder_id, {})
+    
+    async def get_product_info(self, founder_id: str) -> Dict[str, Any]:
+        return self._product_info.get(founder_id, {'name': 'Demo Product'})
+    
+    async def get_trend_info(self, trend_id: str) -> Dict[str, Any]:
+        return {
+            'topic': 'AI productivity trends',
+            'keywords': ['ai', 'productivity', 'automation', 'efficiency'],
+            'sentiment': 'positive',
+            'relevance_score': 0.8
+        }
+    
+    async def get_content_preferences(self, founder_id: str) -> Dict[str, Any]:
+        return self._content_preferences.get(founder_id, {})
+    
+    async def get_successful_patterns(self, founder_id: str) -> List[Dict[str, Any]]:
+        return [
+            {
+                'pattern_type': 'question_based',
+                'performance_score': 0.8,
+                'characteristics': ['includes question', 'personal touch']
+            },
+            {
+                'pattern_type': 'how_to',
+                'performance_score': 0.7,
+                'characteristics': ['educational', 'step-by-step']
+            }
+        ]
+    
+    async def get_recent_content(self, founder_id: str, limit: int = 10) -> List[str]:
+        return [
+            "Just shared our latest feature update!",
+            "Excited about the AI developments in our industry",
+            "Great meeting with potential customers today"
+        ]
+    
+    async def store_draft(self, draft) -> str:
+        draft_id = f"draft_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{len(self._drafts)}"
+        self._drafts[draft_id] = draft
+        print(f"✅ Stored draft: {draft_id}")
+        return draft_id
+    
+    async def get_draft(self, draft_id: str):
+        return self._drafts.get(draft_id)
+    
+    async def get_drafts_by_founder(self, founder_id: str, limit: int = 20) -> List:
+        return [draft for draft in self._drafts.values() 
+                if hasattr(draft, 'founder_id') and draft.founder_id == founder_id][:limit]
+    
+    async def update_draft_quality_score(self, draft_id: str, quality_score: float) -> bool:
+        if draft_id in self._drafts:
+            self._drafts[draft_id].quality_score = quality_score
+            return True
+        return False
 
-async def demo_comprehensive_seo_workflow():
-    """Demo comprehensive SEO workflow"""
-    print("\n🔄 Demo: Comprehensive SEO Workflow")
+async def demo_basic_content_generation():
+    """Demo basic content generation functionality"""
+    print("\n📝 Demo: Basic Content Generation")
     
     try:
-        # Create mock services
-        twitter_client, user_service, data_flow_manager = create_mock_services()
-        llm_client = get_llm_client()
+        # Create mock database adapter
+        db_adapter = MockDatabaseAdapter()
         
-        # Create SEO service
-        seo_service = create_enhanced_seo_service(
-            twitter_client, user_service, data_flow_manager, llm_client
+        # Create content generation service
+        service = ContentGenerationService(
+            llm_config={'provider': 'openai'},
+            database_adapter=db_adapter
         )
         
-        if not seo_service:
-            print("❌ Could not create SEO service")
-            return
+        print("🔧 Testing basic content generation...")
         
-        print("🔧 Testing comprehensive SEO workflow...")
-        
-        # Test content optimization
-        test_content = "Excited to share our latest AI development tools that boost productivity!"
-        context = {
-            'founder_id': 'demo_founder',
-            'target_keywords': ['AI', 'productivity', 'development'],
-            'target_audience': 'developers'
-        }
-        
-        try:
-            # Use the correct method call
-            result = await seo_service.optimize_content_intelligent(
-                text=test_content,
-                content_type='tweet',
-                context=context,
-                optimization_mode='intelligent'
-            )
-            
-            print(f"📝 Original: {result.get('original_content', 'N/A')}")
-            print(f"✨ Optimized: {result.get('optimized_content', 'N/A')}")
-            print(f"📊 Score: {result.get('optimization_score', 0):.2f}")
-            print(f"🤖 LLM Enhanced: {result.get('llm_enhanced', False)}")
-            
-            if result.get('improvements_made'):
-                print("🔧 Improvements:")
-                for improvement in result['improvements_made'][:3]:
-                    print(f"  • {improvement}")
-                    
-        except Exception as e:
-            print(f"⚠️ Content optimization failed: {e}")
-        
-        # Test content suggestions
-        try:
-            trend_info = {
-                'topic_name': 'AI development trends',
-                'keywords': ['ai', 'development', 'automation']
-            }
-            
-            product_info = {
-                'name': 'AI Development Tools',
-                'target_audience': 'developers',
-                'core_values': ['innovation', 'efficiency'],
-                'industry_category': 'technology'
-            }
-            
-            suggestions = await seo_service.get_content_suggestions(
-                trend_info=trend_info,
-                product_info=product_info,
-                content_type='tweet'
-            )
-            
-            print(f"\n💡 Content Suggestions:")
-            print(f"  🏷️ Hashtags: {', '.join(suggestions.recommended_hashtags[:5])}")
-            print(f"  🔑 Keywords: {', '.join(suggestions.primary_keywords[:3])}")
-            print(f"  📏 Optimal Length: {suggestions.optimal_length}")
-            
-        except Exception as e:
-            print(f"⚠️ Content suggestions failed: {e}")
-        
-        print("\n✅ Comprehensive SEO workflow demo completed!")
-        
-    except Exception as e:
-        print(f"❌ Comprehensive SEO workflow demo failed: {e}")
-
-async def demo_content_generation_with_seo():
-    """Demo content generation with LLM-enhanced SEO"""
-    print("\n📝 Testing Content Generation with LLM-Enhanced SEO...")
-    
-    try:
-        # Create mock services
-        twitter_client, user_service, data_flow_manager = create_mock_services()
-        llm_client = get_llm_client()
-        
-        # Create SEO service
-        seo_service = create_enhanced_seo_service(
-            twitter_client, user_service, data_flow_manager, llm_client
+        # Generate standard tweet
+        draft_ids = await service.generate_content(
+            founder_id="demo_founder",
+            content_type=ContentType.TWEET,
+            generation_mode=GenerationMode.STANDARD,
+            quantity=2
         )
         
-        if not seo_service:
-            print("❌ Could not create SEO service")
-            return
+        print(f"✅ Generated {len(draft_ids)} drafts")
         
-        print("🔧 Testing SEO-enhanced content generation...")
+        # Display generated content
+        for draft_id in draft_ids:
+            draft = await service.get_draft(draft_id)
+            if draft:
+                print(f"\n📄 Draft {draft_id}:")
+                print(f"   Content: {draft.generated_text}")
+                print(f"   Quality Score: {draft.quality_score:.2f}")
+                print(f"   Type: {draft.content_type.value}")
         
-        # Test content optimization directly (simpler approach)
-        test_content = "Excited to announce our new AI-powered development tools!"
-        
-        try:
-            # Use the intelligent optimization method
-            result = await seo_service.optimize_content_intelligent(
-                text=test_content,
-                content_type='tweet',
-                context={
-                    'founder_id': 'demo_founder',
-                    'target_keywords': ['AI', 'development', 'tools'],
-                    'target_audience': 'developers'
-                },
-                optimization_mode='intelligent'
-            )
-            
-            print(f"📝 Original: {result.get('original_content', 'N/A')}")
-            print(f"✨ Optimized: {result.get('optimized_content', 'N/A')}")
-            print(f"📊 Score: {result.get('optimization_score', 0):.2f}")
-            print(f"🤖 LLM Enhanced: {result.get('llm_enhanced', False)}")
-            
-            if result.get('improvements_made'):
-                print("🔧 Improvements:")
-                for improvement in result['improvements_made'][:3]:
-                    print(f"  • {improvement}")
-                    
-        except Exception as e:
-            print(f"⚠️ Content optimization failed: {e}")
-        
-        # Test content suggestions
-        try:
-            trend_info = {
-                'topic_name': 'AI development trends',
-                'keywords': ['ai', 'development', 'automation']
-            }
-            
-            product_info = {
-                'name': 'AI Development Tools',
-                'target_audience': 'developers',
-                'core_values': ['innovation', 'efficiency'],
-                'industry_category': 'technology'
-            }
-            
-            suggestions = await seo_service.get_content_suggestions(
-                trend_info=trend_info,
-                product_info=product_info,
-                content_type='tweet'
-            )
-            
-            print(f"\n💡 Content Suggestions:")
-            print(f"  🏷️ Hashtags: {', '.join(suggestions.recommended_hashtags[:5])}")
-            print(f"  🔑 Keywords: {', '.join(suggestions.primary_keywords[:3])}")
-            print(f"  📏 Optimal Length: {suggestions.optimal_length}")
-            
-        except Exception as e:
-            print(f"⚠️ Content suggestions failed: {e}")
-        
-        # Test SEO potential analysis
-        try:
-            analysis = await seo_service.analyze_content_seo_potential(
-                content=test_content,
-                founder_id='demo_founder',
-                content_type='tweet'
-            )
-            
-            print(f"\n📊 SEO Analysis:")
-            print(f"  🔍 SEO Score: {analysis.get('combined_score', 0):.2f}")
-            print(f"  🤖 LLM Enhanced: {analysis.get('llm_enhanced', False)}")
-            
-            if 'recommendations' in analysis:
-                print("  💡 Top Recommendations:")
-                for rec in analysis['recommendations'][:3]:
-                    print(f"    • {rec}")
-                    
-        except Exception as e:
-            print(f"⚠️ SEO potential analysis failed: {e}")
-        
-        print("\n✅ Content generation with SEO demo completed!")
+        print("\n✅ Basic content generation demo completed!")
         
     except Exception as e:
-        print(f"❌ Content generation with SEO demo failed: {e}")
+        print(f"❌ Basic content generation demo failed: {e}")
         import traceback
         traceback.print_exc()
 
-async def demo_system_integration():
-    """Demo full system integration"""
-    print("\n🔗 Demo: Full System Integration")
+async def demo_generation_modes():
+    """Demo different generation modes"""
+    print("\n🎯 Demo: Different Generation Modes")
     
     try:
-        # Create mock services
-        twitter_client, user_service, data_flow_manager = create_mock_services()
-        llm_client = get_llm_client()
-        
-        # Create SEO service
-        seo_service = create_enhanced_seo_service(
-            twitter_client, user_service, data_flow_manager, llm_client
+        db_adapter = MockDatabaseAdapter()
+        service = ContentGenerationService(
+            llm_config={'provider': 'openai'},
+            database_adapter=db_adapter
         )
         
-        if not seo_service:
-            print("❌ Could not create SEO service")
-            return
+        modes = [
+            (GenerationMode.VIRAL_FOCUSED, "viral-focused"),
+            (GenerationMode.BRAND_FOCUSED, "brand-focused"),
+            (GenerationMode.ENGAGEMENT_OPTIMIZED, "engagement-optimized")
+        ]
         
-        print("🔧 Testing full system integration...")
-        
-        # Test SEO analytics
-        try:
-            analytics = seo_service.get_seo_analytics_summary('demo_founder', 30)
+        for mode, description in modes:
+            print(f"\n🔧 Testing {description} content generation...")
             
-            print(f"📈 Total Optimizations: {analytics.get('total_optimizations', 0)}")
-            print(f"📊 Average Score: {analytics.get('avg_optimization_score', 0):.2f}")
-            print(f"🤖 LLM Enhanced: {analytics.get('llm_enabled', False)}")
-            
-        except Exception as e:
-            print(f"⚠️ SEO analytics failed: {e}")
-        
-        # Test SEO recommendations
-        try:
-            recommendations = seo_service.get_seo_recommendations('demo_founder')
-            
-            if recommendations:
-                print("💡 SEO Recommendations:")
-                hashtag_rec = recommendations.get('hashtag_strategy', {}).get('recommendation', 'N/A')
-                keyword_rec = recommendations.get('keyword_focus', {}).get('recommendation', 'N/A')
-                print(f"  • Hashtag Strategy: {hashtag_rec}")
-                print(f"  • Keyword Focus: {keyword_rec}")
+            try:
+                if mode == GenerationMode.VIRAL_FOCUSED:
+                    draft_ids = await service.generate_viral_focused_content(
+                        founder_id="demo_founder",
+                        content_type=ContentType.TWEET,
+                        quantity=1
+                    )
+                elif mode == GenerationMode.BRAND_FOCUSED:
+                    draft_ids = await service.generate_brand_focused_content(
+                        founder_id="demo_founder",
+                        content_type=ContentType.TWEET,
+                        quantity=1
+                    )
+                else:
+                    draft_ids = await service.generate_content(
+                        founder_id="demo_founder",
+                        content_type=ContentType.TWEET,
+                        generation_mode=mode,
+                        quantity=1
+                    )
                 
-        except Exception as e:
-            print(f"⚠️ SEO recommendations failed: {e}")
+                if draft_ids:
+                    draft = await service.get_draft(draft_ids[0])
+                    if draft:
+                        print(f"📄 {description.title()} Content:")
+                        print(f"   {draft.generated_text}")
+                        print(f"   Quality: {draft.quality_score:.2f}")
+                
+            except Exception as e:
+                print(f"⚠️ {description} generation failed: {e}")
         
-        print("\n✅ System integration demo completed!")
+        print("\n✅ Generation modes demo completed!")
+                    
+    except Exception as e:
+        print(f"❌ Generation modes demo failed: {e}")
+
+async def demo_content_types():
+    """Demo different content types"""
+    print("\n📱 Demo: Different Content Types")
+    
+    try:
+        db_adapter = MockDatabaseAdapter()
+        service = ContentGenerationService(
+            llm_config={'provider': 'openai'},
+            database_adapter=db_adapter
+        )
+        
+        content_types = [
+            (ContentType.TWEET, "Tweet"),
+            (ContentType.REPLY, "Reply"),
+            (ContentType.THREAD, "Thread"),
+            (ContentType.QUOTE_TWEET, "Quote Tweet")
+        ]
+        
+        for content_type, description in content_types:
+            print(f"\n🔧 Testing {description} generation...")
+            
+            try:
+                draft_ids = await service.generate_content(
+                    founder_id="demo_founder",
+                    content_type=content_type,
+                    generation_mode=GenerationMode.STANDARD,
+                    quantity=1
+                )
+                
+                if draft_ids:
+                    draft = await service.get_draft(draft_ids[0])
+                    if draft:
+                        print(f"📄 {description}:")
+                        print(f"   {draft.generated_text}")
+                        print(f"   Quality: {draft.quality_score:.2f}")
+                        print(f"   Length: {len(draft.generated_text)} characters")
+            
+            except Exception as e:
+                print(f"⚠️ {description} generation failed: {e}")
+        
+        print("\n✅ Content types demo completed!")
         
     except Exception as e:
-        print(f"❌ System integration demo failed: {e}")
+        print(f"❌ Content types demo failed: {e}")
+
+async def demo_quality_assessment():
+    """Demo content quality assessment"""
+    print("\n📊 Demo: Content Quality Assessment")
+    
+    try:
+        db_adapter = MockDatabaseAdapter()
+        service = ContentGenerationService(
+            llm_config={'provider': 'openai'},
+            database_adapter=db_adapter
+        )
+        
+        print("🔧 Testing quality assessment...")
+        
+        # Generate content with different quality thresholds
+        thresholds = [0.3, 0.6, 0.8]
+        
+        for threshold in thresholds:
+            print(f"\n📏 Testing with quality threshold: {threshold}")
+            
+            try:
+                draft_ids = await service.generate_content(
+                    founder_id="demo_founder",
+                    content_type=ContentType.TWEET,
+                    generation_mode=GenerationMode.STANDARD,
+                    quantity=3
+                )
+                
+                # Filter by quality threshold
+                quality_drafts = []
+                for draft_id in draft_ids:
+                    draft = await service.get_draft(draft_id)
+                    if draft and draft.quality_score >= threshold:
+                        quality_drafts.append(draft)
+                
+                print(f"✅ {len(quality_drafts)}/{len(draft_ids)} drafts meet threshold {threshold}")
+                
+                if quality_drafts:
+                    best_draft = max(quality_drafts, key=lambda d: d.quality_score)
+                    print(f"🏆 Best draft (score: {best_draft.quality_score:.2f}):")
+                    print(f"   {best_draft.generated_text}")
+                    
+            except Exception as e:
+                print(f"⚠️ Quality assessment failed for threshold {threshold}: {e}")
+        
+        print("\n✅ Quality assessment demo completed!")
+        
+    except Exception as e:
+        print(f"❌ Quality assessment demo failed: {e}")
+
+async def demo_brand_voice_customization():
+    """Demo brand voice customization"""
+    print("\n🎨 Demo: Brand Voice Customization")
+    
+    try:
+        db_adapter = MockDatabaseAdapter()
+        service = ContentGenerationService(
+            llm_config={'provider': 'openai'},
+            database_adapter=db_adapter
+        )
+        
+        print("🔧 Testing brand voice customization...")
+        
+        # Test different brand voices
+        brand_voices = [
+            BrandVoice(
+                tone="casual",
+                style="conversational",
+                personality_traits=["friendly", "approachable"],
+                formality_level=0.2
+            ),
+            BrandVoice(
+                tone="professional",
+                style="authoritative", 
+                personality_traits=["expert", "reliable"],
+                formality_level=0.8
+            ),
+            BrandVoice(
+                tone="enthusiastic",
+                style="inspiring",
+                personality_traits=["energetic", "motivational"],
+                formality_level=0.4
+            )
+        ]
+        
+        for i, brand_voice in enumerate(brand_voices, 1):
+            print(f"\n🎭 Testing Brand Voice {i} ({brand_voice.tone}, {brand_voice.style}):")
+            
+            try:
+                draft_ids = await service.generate_brand_focused_content(
+                    founder_id="demo_founder",
+                    custom_brand_voice=brand_voice,
+                    content_type=ContentType.TWEET,
+                    quantity=1
+                )
+                
+                if draft_ids:
+                    draft = await service.get_draft(draft_ids[0])
+                    if draft:
+                        print(f"📄 Content: {draft.generated_text}")
+                        print(f"📊 Quality: {draft.quality_score:.2f}")
+                    
+            except Exception as e:
+                print(f"⚠️ Brand voice {i} generation failed: {e}")
+        
+        print("\n✅ Brand voice customization demo completed!")
+        
+    except Exception as e:
+        print(f"❌ Brand voice customization demo failed: {e}")
+
+async def demo_draft_management():
+    """Demo draft management functionality"""
+    print("\n📋 Demo: Draft Management")
+    
+    try:
+        db_adapter = MockDatabaseAdapter()
+        service = ContentGenerationService(
+            llm_config={'provider': 'openai'},
+            database_adapter=db_adapter
+        )
+        
+        print("🔧 Testing draft management...")
+        
+        # Generate some drafts
+        draft_ids = await service.generate_content(
+            founder_id="demo_founder",
+            content_type=ContentType.TWEET,
+            generation_mode=GenerationMode.STANDARD,
+            quantity=3
+        )
+        
+        print(f"✅ Generated {len(draft_ids)} drafts for management demo")
+        
+        # Test getting drafts by founder
+        founder_drafts = await service.get_drafts_by_founder("demo_founder", limit=10)
+        print(f"📄 Found {len(founder_drafts)} drafts for founder")
+        
+        # Test updating quality scores
+        if draft_ids:
+            test_draft_id = draft_ids[0]
+            new_score = 0.95
+            
+            success = await service.update_draft_quality_score(test_draft_id, new_score)
+            if success:
+                print(f"✅ Updated quality score for draft {test_draft_id} to {new_score}")
+                
+                # Verify the update
+                updated_draft = await service.get_draft(test_draft_id)
+                if updated_draft:
+                    print(f"📊 Verified new score: {updated_draft.quality_score}")
+        
+        print("\n✅ Draft management demo completed!")
+        
+    except Exception as e:
+        print(f"❌ Draft management demo failed: {e}")
+
+def demo_module_configuration():
+    """Demo module configuration and capabilities"""
+    print("\n⚙️ Demo: Module Configuration")
+    
+    print("🔧 Content Generation Module Configuration:")
+    print("✅ Streamlined content generation focused on quality")
+    print("✅ Multiple generation modes: standard, viral-focused, brand-focused")
+    print("✅ Content type support: tweets, replies, threads, quote tweets")
+    print("✅ Brand voice customization and consistency")
+    print("✅ Quality assessment and filtering")
+    print("✅ Draft management and storage")
+    
+    # Check LLM availability
+    api_key = get_openai_api_key()
+    if api_key:
+        print("✅ LLM client configured for intelligent content generation")
+    else:
+        print("⚠️ LLM client not available - using mock responses")
+    
+    print("\n🎯 Module Focus:")
+    print("• Pure content generation without SEO optimization")
+    print("• Quality-driven content creation")
+    print("• Brand voice consistency")
+    print("• Flexible generation modes")
+    print("• Comprehensive content type support")
 
 async def main():
-    """Run all content generation demos with SEO integration"""
-    print("🚀 Content Generation with SEO Integration Demo")
-    print("=" * 60)
+    """Run all content generation demos"""
+    print("🚀 Content Generation Module Demo")
+    print("=" * 50)
     
     # Check API key availability
     api_key = get_openai_api_key()
     if api_key:
         print("✅ OpenAI API key available - running full demos")
     else:
-        print("⚠️ OpenAI API key not available - running limited demos")
+        print("⚠️ OpenAI API key not available - running with mock responses")
     
-    print("\n" + "=" * 60)
+    print("\n" + "=" * 50)
     
     # Run demos
     try:
         # Configuration demo (non-async)
-        demo_seo_configuration()
+        demo_module_configuration()
         
-        # Basic demos
-        await demo_basic_seo_content_generation()
-        await demo_comprehensive_seo_workflow()
-        await demo_content_generation_with_seo()
-        
-        # Advanced demos
-        await demo_system_integration()
+        # Core functionality demos
+        await demo_basic_content_generation()
+        await demo_generation_modes()
+        await demo_content_types()
+        await demo_quality_assessment()
+        await demo_brand_voice_customization()
+        await demo_draft_management()
         
     except Exception as e:
         print(f"❌ Demo execution failed: {e}")
         import traceback
         traceback.print_exc()
     
-    print("\n" + "=" * 60)
-    print("🎉 Content Generation with SEO Demo Completed!")
+    print("\n" + "=" * 50)
+    print("🎉 Content Generation Demo Completed!")
     
-    print("\n🔧 Integration Summary:")
-    print("✅ SEO-enhanced content generation")
-    print("✅ Intelligent content optimization")
-    print("✅ Content variation generation")
-    print("✅ SEO potential analysis")
-    print("✅ Full system integration")
+    print("\n🔧 Capabilities Demonstrated:")
+    print("✅ Basic content generation")
+    print("✅ Multiple generation modes")
+    print("✅ Content type handling")
+    print("✅ Quality assessment")
+    print("✅ Brand voice customization")
+    print("✅ Draft management")
     
-    print("\n💡 Key Features Demonstrated:")
-    print("• Automatic SEO optimization during content generation")
-    print("• LLM-powered content enhancement")
-    print("• Hashtag and keyword optimization")
-    print("• Content quality scoring")
-    print("• Multiple optimization strategies")
-    print("• Real-time SEO analysis")
+    print("\n💡 Key Features:")
+    print("• Streamlined, focused content generation")
+    print("• Quality-driven approach")
+    print("• Brand consistency maintenance")
+    print("• Flexible generation modes")
+    print("• Comprehensive draft management")
+    
+    print("\n📌 Note:")
+    print("For SEO optimization, use the dedicated SEO module")
+    print("This module focuses purely on content creation and quality")
 
 if __name__ == "__main__":
     asyncio.run(main())

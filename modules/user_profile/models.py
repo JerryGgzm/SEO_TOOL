@@ -1,8 +1,13 @@
-"""User profile data models""" 
+"""User Profile Models
+
+This module defines the data models for user profile management,
+including registration, authentication, and profile information.
+"""
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, HttpUrl, EmailStr, Field, validator
 from datetime import datetime
 import json
+from enum import Enum
 
 class ProductKeywords(BaseModel):
     """Product keywords structure"""
@@ -98,7 +103,7 @@ class TwitterCredentials(BaseModel):
             return False
         return datetime.utcnow() >= self.expires_at
 
-class UserRegistrationRequest(BaseModel):
+class UserRegistration(BaseModel):
     """User registration request model"""
     email: EmailStr
     username: str = Field(..., min_length=3, max_length=50)
@@ -106,6 +111,9 @@ class UserRegistrationRequest(BaseModel):
     full_name: Optional[str] = None
     company_name: Optional[str] = None
     terms_accepted: bool = Field(..., description="Must accept terms of service")
+    industry: Optional[str] = None
+    website: Optional[str] = None
+    twitter_handle: Optional[str] = None
     
     @validator('terms_accepted')
     def terms_must_be_accepted(cls, v):
@@ -113,11 +121,38 @@ class UserRegistrationRequest(BaseModel):
             raise ValueError('Must accept terms of service')
         return v
 
-class UserLoginRequest(BaseModel):
+class UserLogin(BaseModel):
     """User login request model"""
     email: EmailStr
     password: str
 
-class ProductInfoUpdateRequest(BaseModel):
+class ProductInfoUpdate(BaseModel):
     """Product information update request model"""
     product_info: ProductInfoData
+
+
+class TwitterAuthResponse(BaseModel):
+    """Twitter OAuth response model"""
+    user_id: str
+    twitter_username: str
+    access_token: str
+    access_token_secret: str
+    created_at: datetime
+
+class TwitterStatus(BaseModel):
+    """Twitter connection status model"""
+    connected: bool
+    twitter_username: Optional[str] = None
+    last_sync: Optional[datetime] = None
+    error_message: Optional[str] = None
+
+
+class UserPreferences(BaseModel):
+    """User preferences model"""
+    content_frequency: str = "daily"
+    preferred_posting_times: List[str] = []
+    content_types: List[str] = ["tweet", "thread"]
+    auto_schedule: bool = True
+    notification_settings: Dict[str, bool] = Field(default_factory=dict)
+    theme: str = "light"
+    language: str = "en"

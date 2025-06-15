@@ -14,8 +14,8 @@ class APIEndpoint:
 class TwitterAPIEndpoints:
     """Twitter API v2 endpoint configurations"""
     
-    BASE_URL_V2 = "https://api.twitter.com/2"
-    BASE_URL_V1_1 = "https://api.twitter.com/1.1"
+    BASE_URL_V2 = "https://api.x.com/2"
+    BASE_URL_V1_1 = "https://api.x.com/1.1"
     
     # Tweet endpoints
     CREATE_TWEET = APIEndpoint(
