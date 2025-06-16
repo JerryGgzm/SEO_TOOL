@@ -12,7 +12,13 @@ from .repositories.trend_repository import TrendRepository
 from .repositories.content_repository import ContentRepository
 from .repositories.analytics_repository import AnalyticsRepository
 from .dataflow_manager import DataFlowManager
-from .models import Base, Founder, Product, AnalyzedTrend, TwitterCredential, TrackedTrendRaw, AutomationRule, PostAnalytic, GeneratedContentDraft  
+from .models import (
+    Base, Founder, Product, AnalyzedTrend, TwitterCredential, 
+    TrackedTrendRaw, AutomationRule, PostAnalytic, GeneratedContentDraft
+)
+
+# 确保导入UserProfileTable以便创建表
+from modules.user_profile.repository import UserProfileTable
 
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker, Session

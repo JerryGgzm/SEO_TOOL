@@ -33,7 +33,7 @@ from typing import Dict, Any, Optional, List
 from pprint import pprint
 import urllib.parse
 from dotenv import load_dotenv
-from validate_env import validate_env
+# from validate_env import validate_env
 
 load_dotenv('.env')
 
@@ -99,16 +99,21 @@ class APIClient:
         
         try:
             # 确保认证头存在
-            if self.auth_token and 'Authorization' not in self.session.headers:
-                self.session.headers.update({
-                    'Authorization': f'Bearer {self.auth_token}'
-                })
+            headers = {}
+            if self.auth_token:
+                headers['Authorization'] = f'Bearer {self.auth_token}'
+                
+            # 为了调试，打印请求信息
+            print(f"发送请求: {method} {url}")
+            if self.auth_token:
+                print(f"使用令牌: {self.auth_token[:20]}...")
             
             response = self.session.request(
                 method=method,
                 url=url,
                 json=data,
                 params=params,
+                headers=headers,
                 timeout=30
             )
             
@@ -164,20 +169,20 @@ class CompleteWorkflowDemo:
         
         # 尝试登录
         print("尝试登录现有用户...")
-        login_response = self.api_client.request("POST", "/auth/login", {
+        login_response = self.api_client.request("POST", "/api/user/login", {
             "email": self.demo_user["email"],
             "password": self.demo_user["password"]
         })
         
-        if "error" not in login_response and "access_token" in login_response:
+        if "error" not in login_response and "token" in login_response:
             print_success("登录成功")
-            self.api_client.set_auth_token(login_response["access_token"])
+            self.api_client.set_auth_token(login_response["token"])
             self.api_client.user_id = login_response.get("user_id")
             return True
             
         # 注册新用户
         print("注册新用户...")
-        register_response = self.api_client.request("POST", "/auth/register", {
+        register_response = self.api_client.request("POST", "/api/user/register", {
             "email": self.demo_user["email"],
             "password": self.demo_user["password"],
             "username": self.demo_user["username"],
@@ -191,7 +196,7 @@ class CompleteWorkflowDemo:
             print_success(f"注册成功: {register_response.get('message', '')}")
         
         # 登录
-        login_response = self.api_client.request("POST", "/auth/login", {
+        login_response = self.api_client.request("POST", "/api/user/login", {
             "email": self.demo_user["email"],
             "password": self.demo_user["password"]
         })
@@ -200,12 +205,13 @@ class CompleteWorkflowDemo:
             print_error(f"登录失败: {login_response['error']}")
             return False
             
-        if "access_token" not in login_response:
+        if "token" not in login_response:
+            print(f"login_response: {login_response}")
             print_error("登录响应中没有访问令牌")
             return False
             
         print_success("登录成功")
-        self.api_client.set_auth_token(login_response["access_token"])
+        self.api_client.set_auth_token(login_response["token"])
         self.api_client.user_id = login_response.get("user_id")
         
         # 更新产品信息
@@ -265,7 +271,6 @@ class CompleteWorkflowDemo:
             
         auth_url = auth_response["auth_url"]
         state = auth_response["state"]
-        code_verifier = auth_response["code_verifier"]  # 获取code_verifier
         
         print(f"\n🔐 授权URL:")
         print(f"{Colors.CYAN}{auth_url}{Colors.END}")
@@ -291,12 +296,12 @@ class CompleteWorkflowDemo:
             print_error("未输入授权码")
             return False
             
-        # 处理回调
+        # 处理回调 - 不再需要传递code_verifier
         print("\n正在处理授权...")
         callback_response = self.api_client.request("POST", "/api/user/profile/twitter/callback", {
             "code": code,
-            "state": state,
-            "code_verifier": code_verifier  # 添加code_verifier
+            "state": state
+            # 注意：code_verifier 现在由服务器安全管理，不需要客户端传递
         })
         
         if "error" in callback_response:
@@ -318,6 +323,7 @@ class CompleteWorkflowDemo:
         # 获取最新趋势
         print("获取最新Twitter趋势...")
         trends_response = self.api_client.request("GET", "/api/trends/latest")
+        print("trends_response: ", trends_response)
         
         if "error" in trends_response:
             print_warning(f"获取趋势失败: {trends_response['error']}")

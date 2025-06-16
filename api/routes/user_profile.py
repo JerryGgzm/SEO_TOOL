@@ -40,9 +40,16 @@ def generate_jwt_token(user_id: str) -> str:
     """Generate JWT token for user"""
     payload = {
         "user_id": user_id,
-        "exp": datetime.utcnow() + JWT_EXPIRATION
+        "sub": user_id,  # 添加标准的sub字段
+        "exp": datetime.utcnow() + JWT_EXPIRATION,
+        "iat": datetime.utcnow()
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    logger.info(f"生成JWT token - user_id: {user_id}")
+    logger.info(f"JWT payload: {payload}")
+    logger.info(f"JWT secret (first 10 chars): {JWT_SECRET[:10]}...")
+    token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    logger.info(f"生成的token (first 50 chars): {token[:50]}...")
+    return token
 
 def verify_jwt_token(token: str) -> Dict[str, Any]:
     """Verify and decode JWT token"""
@@ -66,17 +73,29 @@ async def register(
 ):
     """Register a new user"""
     try:
-        service = UserProfileService(data_flow_manager)
-        user = await service.register_user(registration)
+        # 创建repository实例
+        from modules.user_profile.repository import UserProfileRepository
+        repository = UserProfileRepository(data_flow_manager.db_session)
+        service = UserProfileService(repository, data_flow_manager)
+        result, message = service.register_user(registration)
+        
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=message
+            )
+        
+        # message is the user_id when successful
+        user_id = message
         
         # Generate JWT token
-        token = generate_jwt_token(user.id)
+        token = generate_jwt_token(user_id)
         
         return JSONResponse(
             status_code=status.HTTP_201_CREATED,
             content={
                 "message": "User registered successfully",
-                "user_id": user.id,
+                "user_id": user_id,
                 "token": token
             }
         )
@@ -94,23 +113,26 @@ async def login(
 ):
     """Login user"""
     try:
-        service = UserProfileService(data_flow_manager)
-        user = await service.authenticate_user(login_data.email, login_data.password)
+        # 创建repository实例
+        from modules.user_profile.repository import UserProfileRepository
+        repository = UserProfileRepository(data_flow_manager.db_session)
+        service = UserProfileService(repository, data_flow_manager)
+        user_id = service.authenticate_user(login_data)
         
-        if not user:
+        if not user_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials"
             )
         
         # Generate JWT token
-        token = generate_jwt_token(user.id)
+        token = generate_jwt_token(user_id)
         
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={
                 "message": "Login successful",
-                "user_id": user.id,
+                "user_id": user_id,
                 "token": token
             }
         )
@@ -130,8 +152,11 @@ async def get_profile(
 ):
     """Get user profile"""
     try:
-        service = UserProfileService(data_flow_manager)
-        profile = await service.get_user_profile(current_user.id)
+        # 创建repository实例
+        from modules.user_profile.repository import UserProfileRepository
+        repository = UserProfileRepository(data_flow_manager.db_session)
+        service = UserProfileService(repository, data_flow_manager)
+        profile = service.get_user_profile(current_user.id)
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={
@@ -153,9 +178,13 @@ async def update_product_info(
     data_flow_manager: DataFlowManager = Depends(get_data_flow_manager)
 ):
     """Update product information"""
+    logger.info(f"update_product_info: {product_info}")
     try:
-        service = UserProfileService(data_flow_manager)
-        success = await service.update_product_info(current_user.id, product_info)
+        # 创建repository实例
+        from modules.user_profile.repository import UserProfileRepository
+        repository = UserProfileRepository(data_flow_manager.db_session)
+        service = UserProfileService(repository, data_flow_manager)
+        success = service.update_product_info(current_user.id, product_info)
         
         if not success:
             raise HTTPException(
@@ -186,8 +215,11 @@ async def get_product_info(
 ):
     """Get product information"""
     try:
-        service = UserProfileService(data_flow_manager)
-        product_info = await service.get_product_info(current_user.id)
+        # 创建repository实例
+        from modules.user_profile.repository import UserProfileRepository
+        repository = UserProfileRepository(data_flow_manager.db_session)
+        service = UserProfileService(repository, data_flow_manager)
+        product_info = service.get_product_info(current_user.id)
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={
@@ -271,31 +303,40 @@ async def get_twitter_auth_url(
         from modules.user_profile.repository import UserProfileRepository
         repository = UserProfileRepository(data_flow_manager.db_session)
         service = UserProfileService(repository, data_flow_manager)
-        auth_url, state, code_verifier = service.get_twitter_auth_url(current_user.id)
+        logger.info(f"current_user.id: {current_user.id}")
+        auth_url, state = service.get_twitter_auth_url(current_user.id)
         
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={
                 "auth_url": auth_url,
-                "state": state,
-                "code_verifier": code_verifier
+                "state": state
+                # 注意：出于安全考虑，不返回code_verifier
             }
         )
     except Exception as e:
-        logger.error(f"获取Twitter授权URL失败: {e}")
+        logger.error(f"get_twitter_auth_url获取Twitter授权URL失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取Twitter授权URL失败: {str(e)}"
+            detail=f"get_twitter_auth_url获取Twitter授权URL失败: {str(e)}"
         )
 
 @router.post("/profile/twitter/callback")
 async def twitter_callback(
-    code: str = Body(...),
-    state: str = Body(...),
+    request_data: dict = Body(...),
     data_flow_manager: DataFlowManager = Depends(get_data_flow_manager)
 ):
     """处理Twitter OAuth回调"""
     try:
+        code = request_data.get('code')
+        state = request_data.get('state')
+        
+        if not code or not state:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Missing required parameters: code and state"
+            )
+        
         from modules.user_profile.repository import UserProfileRepository
         repository = UserProfileRepository(data_flow_manager.db_session)
         service = UserProfileService(repository, data_flow_manager)
@@ -323,7 +364,10 @@ async def refresh_twitter_token(
 ):
     """刷新Twitter访问令牌"""
     try:
-        service = UserProfileService(data_flow_manager)
+        # 创建repository实例
+        from modules.user_profile.repository import UserProfileRepository
+        repository = UserProfileRepository(data_flow_manager.db_session)
+        service = UserProfileService(repository, data_flow_manager)
         token_info = service.refresh_twitter_token(current_user.id)
         
         if not token_info:
@@ -354,7 +398,10 @@ async def revoke_twitter_token(
 ):
     """撤销Twitter访问令牌"""
     try:
-        service = UserProfileService(data_flow_manager)
+        # 创建repository实例
+        from modules.user_profile.repository import UserProfileRepository
+        repository = UserProfileRepository(data_flow_manager.db_session)
+        service = UserProfileService(repository, data_flow_manager)
         success = service.revoke_twitter_token(current_user.id)
         
         if not success:
