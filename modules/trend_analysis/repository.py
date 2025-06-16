@@ -1,11 +1,12 @@
 from typing import List, Optional, Dict, Any
-from sqlalchemy import Column, String, DateTime, Float, Integer, Text, JSON, Boolean
+from sqlalchemy import Column, String, DateTime, Float, Integer, Text, JSON, Boolean, or_
 # from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 import json
 import logging
+import uuid
 
 from .models import AnalyzedTrend, TrendAnalysisConfig
 
@@ -56,6 +57,13 @@ class AnalyzedTrendTable(Base):
     # Metadata
     expires_at = Column(DateTime, index=True)
     tags = Column(JSON)
+    
+    # Additional fields for simple trending topics storage
+    tweet_volume = Column(Integer, default=0)
+    url = Column(String(500))
+    location_id = Column(String(50))
+    source = Column(String(100))
+    trend_metadata = Column(JSON)
 
 class TrendAnalysisRepository:
     """Repository for trend analysis data storage and retrieval"""
@@ -103,13 +111,86 @@ class TrendAnalysisRepository:
             self.db_session.rollback()
             return False
     
+    async def store_trending_topic(self, user_id: str, topic_name: str, 
+                                 tweet_volume: int = 0, url: str = None, 
+                                 matching_keywords: List[str] = None,
+                                 relevance_score: float = 0.0, 
+                                 confidence_score: float = 0.0,
+                                 location_id: str = "1", source: str = "twitter",
+                                 metadata: Dict[str, Any] = None) -> Optional[AnalyzedTrendTable]:
+        """Store a simple trending topic to the database"""
+        try:
+            # Create a simple trend entry
+            trend_id = str(uuid.uuid4())
+            
+            # Create default sentiment and metrics
+            default_sentiment = {
+                "positive": 0.4,
+                "negative": 0.2,
+                "neutral": 0.4,
+                "dominant_sentiment": "neutral"
+            }
+            
+            default_metrics = {
+                "tweet_volume": tweet_volume,
+                "engagement_rate": 0.0,
+                "reach": 0,
+                "impressions": 0
+            }
+            
+            trend_data = AnalyzedTrendTable(
+                id=trend_id,
+                user_id=user_id,
+                trend_source="twitter",
+                trend_source_id=f"twitter_{topic_name}",
+                topic_name=topic_name,
+                topic_keywords=matching_keywords or [],
+                analyzed_at=datetime.utcnow(),
+                niche_relevance_score=relevance_score,
+                trend_potential_score=confidence_score,
+                confidence_score=confidence_score,
+                overall_sentiment=default_sentiment,
+                extracted_pain_points=[],
+                common_questions=[],
+                discussion_focus_points=[],
+                key_opportunities=[],
+                is_micro_trend=False,
+                trend_velocity_score=0.0,
+                early_adopter_ratio=0.0,
+                topic_clusters=[],
+                metrics=default_metrics,
+                sample_tweet_ids_analyzed=[],
+                example_tweets=[],
+                expires_at=datetime.utcnow() + timedelta(days=7),  # Expire in 7 days
+                tags=[],
+                tweet_volume=tweet_volume,
+                url=url,
+                location_id=location_id,
+                source=source,
+                trend_metadata=metadata or {}
+            )
+            
+            self.db_session.add(trend_data)
+            self.db_session.commit()
+            return trend_data
+            
+        except Exception as e:
+            logger.error(f"Failed to store trending topic: {e}")
+            self.db_session.rollback()
+            return None
+    
     def get_latest_trends_for_user(self, user_id: str, limit: int = 10,
-                                  include_expired: bool = False) -> List[AnalyzedTrend]:
+                                  include_expired: bool = False, 
+                                  after_time: datetime = None) -> List[AnalyzedTrend]:
         """Get latest analyzed trends for a user"""
         try:
             query = self.db_session.query(AnalyzedTrendTable).filter(
                 AnalyzedTrendTable.user_id == user_id
             )
+            
+            # Filter by time if specified
+            if after_time:
+                query = query.filter(AnalyzedTrendTable.analyzed_at >= after_time)
             
             # Filter out expired trends unless specifically requested
             if not include_expired:
@@ -147,7 +228,7 @@ class TrendAnalysisRepository:
             return []
     
     def get_trends_by_keywords(self, user_id: str, keywords: List[str],
-                              limit: int = 10) -> List[AnalyzedTrend]:
+                              limit: int = 10, after_time: datetime = None) -> List[AnalyzedTrend]:
         """Get trends that match specific keywords"""
         try:
             # Create search conditions for keywords
@@ -157,12 +238,18 @@ class TrendAnalysisRepository:
                     AnalyzedTrendTable.topic_name.ilike(f'%{keyword}%')
                 )
             
-            trends = self.db_session.query(AnalyzedTrendTable).filter(
+            query = self.db_session.query(AnalyzedTrendTable).filter(
                 AnalyzedTrendTable.user_id == user_id,
-                *keyword_conditions,
+                or_(*keyword_conditions) if keyword_conditions else True,
                 (AnalyzedTrendTable.expires_at.is_(None)) |
                 (AnalyzedTrendTable.expires_at > datetime.utcnow())
-            ).order_by(
+            )
+            
+            # Filter by time if specified
+            if after_time:
+                query = query.filter(AnalyzedTrendTable.analyzed_at >= after_time)
+            
+            trends = query.order_by(
                 AnalyzedTrendTable.niche_relevance_score.desc()
             ).limit(limit).all()
             
@@ -171,6 +258,53 @@ class TrendAnalysisRepository:
         except Exception as e:
             logger.error(f"Failed to search trends for keywords: {e}")
             return []
+    
+    async def delete_old_trends(self, user_id: str, before_time: datetime) -> int:
+        """Delete old trends for a user"""
+        try:
+            deleted_count = self.db_session.query(AnalyzedTrendTable).filter(
+                AnalyzedTrendTable.user_id == user_id,
+                AnalyzedTrendTable.analyzed_at < before_time
+            ).delete()
+            
+            self.db_session.commit()
+            logger.info(f"Deleted {deleted_count} old trends for user {user_id}")
+            return deleted_count
+            
+        except Exception as e:
+            logger.error(f"Failed to delete old trends: {e}")
+            self.db_session.rollback()
+            return 0
+    
+    async def get_user_trends_count(self, user_id: str) -> int:
+        """Get total count of trends for a user"""
+        try:
+            count = self.db_session.query(AnalyzedTrendTable).filter(
+                AnalyzedTrendTable.user_id == user_id,
+                (AnalyzedTrendTable.expires_at.is_(None)) |
+                (AnalyzedTrendTable.expires_at > datetime.utcnow())
+            ).count()
+            
+            return count
+            
+        except Exception as e:
+            logger.error(f"Failed to get trends count for user {user_id}: {e}")
+            return 0
+    
+    async def get_latest_trend_for_user(self, user_id: str) -> Optional[AnalyzedTrendTable]:
+        """Get the latest trend for a user"""
+        try:
+            trend = self.db_session.query(AnalyzedTrendTable).filter(
+                AnalyzedTrendTable.user_id == user_id
+            ).order_by(
+                AnalyzedTrendTable.analyzed_at.desc()
+            ).first()
+            
+            return trend
+            
+        except Exception as e:
+            logger.error(f"Failed to get latest trend for user {user_id}: {e}")
+            return None
     
     def delete_expired_trends(self) -> int:
         """Delete expired trend analyses"""

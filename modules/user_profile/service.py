@@ -9,11 +9,14 @@ import base64
 from datetime import datetime, timedelta
 import os
 import time
+import logging
 
 from .repository import UserProfileRepository
 from .models import UserProfileData, ProductInfoData, TwitterCredentials, UserRegistration, UserLogin
 from database.dataflow_manager import DataFlowManager
 from modules.twitter_api import TwitterAPIClient
+
+logger = logging.getLogger(__name__)
 
 class TwitterOAuthError(Exception):
     """Twitter OAuth related exception"""
@@ -88,10 +91,13 @@ class UserProfileService:
     def handle_twitter_callback(self, code: str, state: str) -> Dict[str, Any]:
         """处理Twitter OAuth回调"""
         try:
-            # 获取code_verifier
-            code_verifier = self._get_code_verifier(state)
-            if not code_verifier:
+            # 获取code_verifier和user_id
+            verifier_data = self._get_code_verifier_data(state)
+            if not verifier_data:
                 raise TwitterOAuthError("Invalid state parameter")
+            
+            code_verifier = verifier_data['code_verifier']
+            user_id = verifier_data['user_id']
             
             # 交换访问令牌
             twitter_client = TwitterAPIClient(
@@ -115,6 +121,25 @@ class UserProfileService:
             )
             user_info_response.raise_for_status()
             user_info = user_info_response.json()
+            
+            # 准备保存的凭证数据
+            credentials_data = {
+                "access_token": token_info["access_token"],
+                "refresh_token": token_info.get("refresh_token"),
+                "token_type": "Bearer",
+                "expires_at": datetime.utcnow() + timedelta(seconds=token_info.get("expires_in", 7200)),
+                "scope": token_info.get("scope"),
+                "twitter_user_id": user_info.get("data", {}).get("id"),
+                "twitter_username": user_info.get("data", {}).get("username")
+            }
+            
+            # 保存Twitter凭证到数据库
+            success = self.repository.save_twitter_credentials(user_id, credentials_data)
+            if not success:
+                logger.error(f"Failed to save Twitter credentials for user {user_id}")
+                raise TwitterOAuthError("Failed to save Twitter credentials")
+            
+            logger.info(f"Successfully saved Twitter credentials for user {user_id}")
             
             # 清理code_verifier
             self._remove_code_verifier(state)
@@ -192,6 +217,62 @@ class UserProfileService:
         except Exception as e:
             logger.error(f"Failed to revoke Twitter token: {e}")
             return False
+
+    def get_twitter_connection_status(self, user_id: str) -> Dict[str, Any]:
+        """获取Twitter连接状态详情"""
+        try:
+            credentials = self.repository.get_twitter_credentials(user_id)
+            
+            if not credentials:
+                return {
+                    "connected": False,
+                    "has_valid_token": False,
+                    "message": "Twitter账户未连接",
+                    "debug_info": "No credentials found in database"
+                }
+            
+            # 检查令牌是否过期
+            is_expired = credentials.is_expired()
+            
+            # 如果令牌未过期，验证令牌有效性
+            if not is_expired:
+                try:
+                    twitter_client = TwitterAPIClient(
+                        client_id=self.twitter_client_id,
+                        client_secret=self.twitter_client_secret
+                    )
+                    is_valid = twitter_client.auth.validate_user_token(credentials.access_token)
+                except Exception as e:
+                    is_valid = False
+                    logger.error(f"验证Twitter令牌失败: {e}")
+            else:
+                is_valid = False
+                
+            return {
+                "connected": True,
+                "has_valid_token": is_valid,
+                "twitter_username": credentials.twitter_username,
+                "expires_at": credentials.expires_at.isoformat() if credentials.expires_at else None,
+                "is_expired": is_expired,
+                "message": "Twitter账户已连接" if is_valid else "Twitter令牌已过期",
+                "debug_info": {
+                    "user_id": user_id,
+                    "has_access_token": bool(credentials.access_token),
+                    "has_refresh_token": bool(credentials.refresh_token),
+                    "token_length": len(credentials.access_token) if credentials.access_token else 0,
+                    "created_at": credentials.created_at.isoformat() if credentials.created_at else None,
+                    "updated_at": credentials.updated_at.isoformat() if credentials.updated_at else None
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"获取Twitter状态失败: {e}")
+            return {
+                "connected": False,
+                "has_valid_token": False,
+                "message": "获取Twitter状态失败",
+                "debug_info": f"Error: {str(e)}"
+            }
     
     # 改进的临时存储实现
     _code_verifiers = {}
@@ -208,6 +289,11 @@ class UserProfileService:
     
     def _get_code_verifier(self, state: str) -> Optional[str]:
         """获取code_verifier并验证是否过期"""
+        data = self._get_code_verifier_data(state)
+        return data['code_verifier'] if data else None
+    
+    def _get_code_verifier_data(self, state: str) -> Optional[Dict[str, Any]]:
+        """获取code_verifier数据并验证是否过期"""
         data = self._code_verifiers.get(state)
         if not data:
             return None
@@ -217,7 +303,7 @@ class UserProfileService:
             self._code_verifiers.pop(state, None)
             return None
             
-        return data['code_verifier']
+        return data
     
     def _remove_code_verifier(self, state: str):
         """删除code_verifier"""

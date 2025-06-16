@@ -87,11 +87,19 @@ class TwitterAPIEndpoints:
         rate_limit_requests=300
     )
     
-    # Trends endpoint (v1.1 - more reliable for trends)
+    # Trends endpoints
     GET_TRENDS = APIEndpoint(
         path="/trends/place.json",
         method="GET",
         version="1.1",
+        rate_limit_requests=75
+    )
+    
+    # Personalized trends endpoint (v2 - user context required)
+    GET_PERSONALIZED_TRENDS = APIEndpoint(
+        path="/users/personalized_trends",
+        method="GET",
+        version="2",
         rate_limit_requests=75
     )
     

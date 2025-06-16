@@ -429,9 +429,84 @@ class TwitterAPIClient:
     
     # ==================== Trends Operations ====================
     
+    def get_personalized_trends(self, user_token: str, max_results: int = 20) -> List[Dict[str, Any]]:
+        """
+        Get personalized trending topics for the authenticated user
+        
+        Args:
+            user_token: User's access token (user context required)
+            max_results: Maximum number of trends to return (default: 20)
+            
+        Returns:
+            List of trend objects with:
+            - trend_name: The name or title of the trend
+            - category: The category (e.g., Politics, Sports)  
+            - post_count: How many posts related to the trend are being seen
+            - trending_since: Timestamp of when it began trending
+        """
+        params = {
+            'personalized_trend.fields': 'trend_name,category,post_count,trending_since'
+        }
+        
+        try:
+            response_data = self._make_request(
+                self.endpoints.GET_PERSONALIZED_TRENDS,
+                user_token,
+                params=params
+            )
+            
+            # Check for API errors in response
+            if 'errors' in response_data:
+                error_messages = []
+                for error in response_data['errors']:
+                    error_msg = f"{error.get('title', 'API Error')}: {error.get('detail', 'Unknown error')}"
+                    error_messages.append(error_msg)
+                raise TwitterAPIError(f"Personalized trends API errors: {'; '.join(error_messages)}")
+            
+            # Extract trends from response
+            trends = response_data.get('data', [])
+            
+            if not trends:
+                logger.warning("No personalized trends data returned from API")
+                return []
+            
+            # Convert to standardized format for compatibility
+            standardized_trends = []
+            for trend in trends:
+                # Skip trends with missing essential data
+                trend_name = trend.get('trend_name', '').strip()
+                if not trend_name:
+                    logger.warning(f"Skipping trend with missing name: {trend}")
+                    continue
+                    
+                standardized_trend = {
+                    'name': trend_name,
+                    'category': trend.get('category', 'General'),
+                    'tweet_volume': trend.get('post_count', 0),
+                    'trending_since': trend.get('trending_since'),
+                    'url': f"https://x.com/search?q={trend_name.replace('#', '%23')}",
+                    'source': 'personalized_trends_v2'
+                }
+                standardized_trends.append(standardized_trend)
+                
+                # Limit results to max_results
+                if len(standardized_trends) >= max_results:
+                    break
+            
+            logger.info(f"Retrieved {len(standardized_trends)} personalized trends")
+            return standardized_trends
+            
+        except TwitterAPIError as e:
+            # If personalized trends fail, log and re-raise
+            logger.error(f"Failed to get personalized trends: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error getting personalized trends: {e}")
+            raise TwitterAPIError(f"Unexpected error: {str(e)}")
+    
     def get_trends_for_location(self, user_token: str, location_id: str = "1") -> List[Dict[str, Any]]:
         """
-        Get trending topics for a location
+        Get trending topics for a location (fallback method)
         
         Args:
             user_token: User's access token  
@@ -460,7 +535,11 @@ class TwitterAPIClient:
                 data = response.json()
                 # Twitter trends API returns array of locations, get first one
                 if data and len(data) > 0:
-                    return data[0].get('trends', [])
+                    trends = data[0].get('trends', [])
+                    # Add source information
+                    for trend in trends:
+                        trend['source'] = 'location_trends_v1.1'
+                    return trends
                 return []
             else:
                 error_data = response.json() if response.content else {}
@@ -470,6 +549,50 @@ class TwitterAPIClient:
         except requests.RequestException as e:
             logger.error(f"Network error getting trends: {e}")
             raise TwitterAPIError(f"Network error: {str(e)}")
+    
+    def get_trends(self, user_token: str, location_id: str = "1", 
+                   prefer_personalized: bool = True, max_results: int = 20) -> List[Dict[str, Any]]:
+        """
+        Get trending topics with intelligent fallback
+        
+        Args:
+            user_token: User's access token
+            location_id: WOEID for location trends (fallback)
+            prefer_personalized: Try personalized trends first
+            max_results: Maximum number of trends to return
+            
+        Returns:
+            List of trending topics
+        """
+        trends = []
+        
+        if prefer_personalized:
+            try:
+                # Try personalized trends first
+                logger.info("Attempting to fetch personalized trends...")
+                trends = self.get_personalized_trends(user_token, max_results)
+                if trends:
+                    logger.info(f"Successfully retrieved {len(trends)} personalized trends")
+                    return trends
+            except TwitterAPIError as e:
+                logger.warning(f"Personalized trends failed: {e}")
+                logger.info("Falling back to location-based trends...")
+            except Exception as e:
+                logger.warning(f"Unexpected error with personalized trends: {e}")
+                logger.info("Falling back to location-based trends...")
+        
+        # Fallback to location-based trends
+        try:
+            logger.info(f"Fetching location-based trends for location: {location_id}")
+            trends = self.get_trends_for_location(user_token, location_id)
+            if trends:
+                logger.info(f"Successfully retrieved {len(trends)} location-based trends")
+                return trends[:max_results]  # Limit results
+        except TwitterAPIError as e:
+            logger.error(f"Location trends also failed: {e}")
+            raise
+            
+        return trends
     
     # ==================== Utility Methods ====================
     
