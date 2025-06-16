@@ -314,46 +314,190 @@ class CompleteWorkflowDemo:
             
         print_success("Twitter账户连接成功")
         print("您现在可以使用Twitter API功能了")
+        
+        # 添加短暂延迟确保数据库事务完全提交
+        import time
+        print("正在确保数据持久化...")
+        time.sleep(3)
+        
         return True
 
     def step_3_trend_analysis(self) -> bool:
         """步骤3: 趋势分析"""
         print_step("步骤3", "趋势分析")
         
-        # 获取最新趋势
-        print("获取最新Twitter趋势...")
-        trends_response = self.api_client.request("GET", "/api/trends/latest")
-        print("trends_response: ", trends_response)
+        # 添加Twitter连接状态验证
+        print("🔍 验证Twitter连接状态...")
+        twitter_status_response = self.api_client.request("GET", "/api/user/profile/twitter/status")
+        print(f"Twitter状态检查: {twitter_status_response}")
         
-        if "error" in trends_response:
-            print_warning(f"获取趋势失败: {trends_response['error']}")
-            # 使用模拟数据
-            self.demo_data["trends"] = [
-                {
-                    "id": "demo_trend_1",
-                    "name": "AI技术",
-                    "tweet_volume": 15000,
-                    "sentiment_score": 0.7,
-                    "description": "人工智能技术发展趋势"
-                },
-                {
-                    "id": "demo_trend_2", 
-                    "name": "创业公司",
-                    "tweet_volume": 8500,
-                    "sentiment_score": 0.6,
-                    "description": "创业公司发展动态"
-                }
-            ]
-            print_warning("使用模拟趋势数据")
+        if "error" not in twitter_status_response:
+            if twitter_status_response.get("connected") and twitter_status_response.get("has_valid_token"):
+                print_success("✅ Twitter连接状态验证通过")
+            else:
+                print_warning("⚠️  Twitter连接状态异常，可能会使用模拟数据")
+                print(f"   - 连接状态: {twitter_status_response.get('connected', False)}")
+                print(f"   - Token有效: {twitter_status_response.get('has_valid_token', False)}")
+                
+                # 显示调试信息
+                debug_info = twitter_status_response.get('debug_info')
+                if debug_info:
+                    if isinstance(debug_info, str):
+                        print(f"   - 调试信息: {debug_info}")
+                    else:
+                        print("   - 调试信息:")
+                        print(f"     * 用户ID: {debug_info.get('user_id', 'N/A')}")
+                        print(f"     * 有access_token: {debug_info.get('has_access_token', False)}")
+                        print(f"     * 有refresh_token: {debug_info.get('has_refresh_token', False)}")
+                        print(f"     * Token长度: {debug_info.get('token_length', 0)}")
+                        print(f"     * 创建时间: {debug_info.get('created_at', 'N/A')}")
         else:
+            print_warning(f"⚠️  无法验证Twitter状态: {twitter_status_response.get('error', '未知错误')}")
+        
+        # 添加短暂延迟以确保数据库事务提交
+        time.sleep(2)
+        
+        # 使用用户产品信息中的关键词
+        user_keywords = ["AI", "Intelligence", "Tech", "Innovate", "Efficiency", "Automation"]
+        print(f"基于产品信息搜索相关趋势: {user_keywords}")
+        
+        # 检查LLM配置
+        has_openai_key = bool(os.getenv('OPENAI_API_KEY'))
+        if has_openai_key:
+            print("✅ OpenAI API密钥已配置，将使用LLM智能匹配")
+        else:
+            print("⚠️  OpenAI API密钥未配置，将使用传统关键词匹配")
+        
+        # 尝试获取个性化Twitter趋势
+        print("从Twitter API获取个性化趋势...")
+        live_trends_params = {
+            "keywords": user_keywords,
+            "location_id": "1",  # 全球趋势作为fallback
+            "limit": 10
+        }
+        
+        # 构建查询参数
+        params_str = "&".join([f"keywords={keyword}" for keyword in user_keywords])
+        params_str += f"&location_id={live_trends_params['location_id']}&limit={live_trends_params['limit']}"
+        # 启用LLM匹配
+        params_str += "&use_llm=true"
+        
+        trends_response = self.api_client.request("GET", f"/api/trends/live?{params_str}")
+        print("live trends response: ", trends_response)
+        
+        if "error" not in trends_response and trends_response.get("trends"):
             self.demo_data["trends"] = trends_response.get("trends", [])
-            print_success(f"获取到 {len(self.demo_data['trends'])} 个趋势")
+            print_success(f"获取到 {len(self.demo_data['trends'])} 个实时Twitter趋势")
             
-        # 显示趋势信息
+            print(f"匹配关键词: {trends_response.get('keywords', [])}")
+            
+            # 显示匹配方法信息
+            matching_method = trends_response.get('matching_method', 'llm')
+            if matching_method == 'llm':
+                print_success("🤖 使用AI大模型进行智能语义匹配")
+            else:
+                print_warning("🔍 使用传统关键词匹配（AI匹配不可用）")
+            
+            # 显示个性化趋势信息
+            print("\n🔥 个性化Twitter趋势:")
+            for i, trend in enumerate(self.demo_data["trends"][:5], 1):
+                matching = trend.get('matching_keywords', [])
+                reasons = trend.get('matching_reasons', [])
+                relevance = trend.get('relevance_score', 0)
+                category = trend.get('category', 'General')
+                source = trend.get('source', 'unknown')
+                
+                # 格式化匹配原因
+                reason_str = ""
+                if reasons and len(reasons) > 0:
+                    reason_str = f" - {reasons[0]}"
+                
+                # 显示趋势类别和来源
+                source_emoji = "🎯" if "personalized" in source else "🌍" if "location" in source else "📱"
+                category_emoji = "💻" if category in ["Technology", "Tech"] else "💼" if category in ["Business"] else "📈"
+                
+                print(f"  {i}. {trend['name']} (热度: {trend.get('tweet_volume', 'N/A')}) [相关度: {relevance:.2f}]{reason_str}")
+                print(f"     {category_emoji} 类别: {category} | {source_emoji} 来源: {source}")
+                if matching:
+                    print(f"     🏷️ 语义关键词: {', '.join(matching)}")
+                    
+            # 询问是否存储这些趋势
+            print("\n💾 是否将这些优质趋势存储到数据库供后续使用？(y/N): ", end="")
+            try:
+                store_choice = input().strip().lower()
+                if store_choice == 'y':
+                    print("正在存储趋势到数据库...")
+                    store_response = self.api_client.request("POST", "/api/trends/fetch-and-store", {
+                        "location_id": live_trends_params['location_id'],
+                        "keywords": user_keywords,
+                        "max_topics": min(len(self.demo_data["trends"]), 10)
+                    })
+                    
+                    if "error" not in store_response:
+                        stored_count = store_response.get("stored_topics", 0)
+                        print_success(f"成功存储了 {stored_count} 个趋势话题到数据库")
+                    else:
+                        print_warning(f"存储失败: {store_response.get('error', '未知错误')}")
+                else:
+                    print("跳过存储步骤")
+            except (KeyboardInterrupt, EOFError):
+                print("\n跳过存储步骤")
+        
+        else:
+            # 实时趋势获取失败，尝试获取数据库中的趋势
+            print_warning("实时趋势获取失败，尝试从数据库获取...")
+            fallback_response = self.api_client.request("GET", f"/api/trends/cached?keywords={params_str}")
+            
+            if "error" not in fallback_response and fallback_response.get("topics"):
+                # 转换格式以匹配现有代码
+                cached_topics = fallback_response.get("topics", [])
+                self.demo_data["trends"] = [
+                    {
+                        "name": topic.get("topic_name", ""),
+                        "tweet_volume": topic.get("tweet_volume", 0),
+                        "relevance_score": topic.get("relevance_score", 0),
+                        "matching_keywords": [],
+                        "source": "database_cached"
+                    } for topic in cached_topics
+                ]
+                print_success(f"从数据库获取到 {len(self.demo_data['trends'])} 个已分析趋势")
+            else:
+                # 都失败了，使用模拟数据
+                print_warning("所有数据源都失败，使用模拟趋势数据")
+                self.demo_data["trends"] = [
+                    {
+                        "id": "demo_trend_1",
+                        "name": "AI智能助手",
+                        "tweet_volume": 25000,
+                        "sentiment_score": 0.8,
+                        "description": "AI智能助手技术发展趋势",
+                        "matching_keywords": ["AI", "智能"]
+                    },
+                    {
+                        "id": "demo_trend_2", 
+                        "name": "企业自动化",
+                        "tweet_volume": 18000,
+                        "sentiment_score": 0.7,
+                        "description": "企业流程自动化趋势",
+                        "matching_keywords": ["自动化", "效率"]
+                    },
+                    {
+                        "id": "demo_trend_3",
+                        "name": "科技创新",
+                        "tweet_volume": 12000,
+                        "sentiment_score": 0.6,
+                        "description": "科技创新发展动态",
+                        "matching_keywords": ["科技", "创新"]
+                    }
+                ]
+                
+        # 显示最终趋势信息
         if self.demo_data["trends"]:
-            print("\n📈 热门趋势:")
+            print(f"\n📈 {len(self.demo_data['trends'])} 个相关趋势话题:")
             for i, trend in enumerate(self.demo_data["trends"][:3], 1):
-                print(f"  {i}. {trend['name']} (热度: {trend.get('tweet_volume', 'N/A')})")
+                keywords = trend.get('matching_keywords', [])
+                keyword_str = f" [关键词: {', '.join(keywords)}]" if keywords else ""
+                print(f"  {i}. {trend['name']} (热度: {trend.get('tweet_volume', 'N/A')}){keyword_str}")
                 
         return True
 
@@ -616,6 +760,16 @@ class CompleteWorkflowDemo:
             print_error(f"无效的步骤编号: {step_number}")
             print("可用步骤: 0-7")
             return False
+        
+        # 对于步骤3及以上，需要确保用户已经登录
+        if step_number >= 3 and not self.api_client.auth_token:
+            print_warning("运行此步骤需要用户登录，自动执行登录...")
+            if not self.check_server_status():
+                return False
+            if not self.step_1_user_registration():
+                print_error("用户登录失败，无法继续")
+                return False
+            print_success("自动登录成功，继续执行步骤...")
             
         step_name, step_func = steps[step_number]
         print(f"\n{Colors.BOLD}🎯 运行步骤 {step_number}: {step_name}{Colors.END}")
