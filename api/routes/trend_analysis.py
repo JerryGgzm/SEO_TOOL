@@ -52,7 +52,8 @@ async def get_trend_repository(
 ) -> TrendAnalysisRepository:
     """Get trend repository with dependencies"""
     try:
-        return TrendAnalysisRepository(data_flow_manager)
+        # DataFlowManager already has db_session, use it directly
+        return TrendAnalysisRepository(data_flow_manager.db_session)
     except Exception as e:
         logger.error(f"Failed to create trend repository: {e}")
         raise HTTPException(
@@ -93,12 +94,26 @@ async def get_latest_trends(
 ):
     """Get latest trending topics"""
     try:
-        trends = await repository.get_latest_trends(limit)
+        trends = repository.get_latest_trends_for_user(current_user.id, limit)
+        # Convert AnalyzedTrend objects to dict format
+        trends_data = []
+        for trend in trends:
+            trends_data.append({
+                "id": trend.id,
+                "name": trend.topic_name,
+                "tweet_volume": getattr(trend.metrics, 'tweet_volume', 0) if hasattr(trend, 'metrics') and trend.metrics else 0,
+                "sentiment_score": trend.confidence_score,
+                "description": f"分析的趋势话题: {trend.topic_name}",
+                "relevance_score": trend.niche_relevance_score,
+                "potential_score": trend.trend_potential_score,
+                "analyzed_at": trend.analyzed_at.isoformat() if trend.analyzed_at else None
+            })
+        
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={
                 "message": "Latest trends retrieved successfully",
-                "trends": trends
+                "trends": trends_data
             }
         )
     except Exception as e:

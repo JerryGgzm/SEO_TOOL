@@ -84,10 +84,18 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     """Get current authenticated user"""
     try:
         token = credentials.credentials
+        logger.info(f"收到认证token (first 50 chars): {token[:50]}...")
+        logger.info(f"使用的SECRET_KEY (first 10 chars): {SECRET_KEY[:10]}...")
+        
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        logger.info(f"解码后的JWT payload: {payload}")
+        
         # 检查两种可能的字段名：sub（标准）和 user_id（我们使用的）
         user_id = payload.get("sub") or payload.get("user_id")
+        logger.info(f"提取的user_id: {user_id}")
+        
         if user_id is None:
+            logger.error(f"Token payload missing user_id: {payload}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid authentication credentials"
@@ -96,32 +104,46 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         # Get user from database
         db = SessionLocal()
         try:
-            service = UserProfileService(UserProfileRepository(db))
+            from database import DataFlowManager
+            # Create a data flow manager with the database session
+            data_flow_manager = DataFlowManager(db)
+            
+            service = UserProfileService(UserProfileRepository(db), data_flow_manager)
+            logger.info(f"Looking for user with ID: {user_id}")
             user_data = service.get_user_profile(user_id)
+            logger.info(f"Found user data: {user_data}")
             if not user_data:
+                logger.error(f"User not found for ID: {user_id}")
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="User not found"
                 )
                 
             # Get Twitter credentials if available
-            twitter_creds = service.repository.get_twitter_credentials(user_id)
-            twitter_access_token = twitter_creds.get('access_token') if twitter_creds else None
+            twitter_access_token = None
+            try:
+                twitter_creds = service.repository.get_twitter_credentials(user_id)
+                if twitter_creds and hasattr(twitter_creds, 'access_token'):
+                    twitter_access_token = twitter_creds.access_token
+                    
+                    # 验证Twitter令牌
+                    if twitter_access_token:
+                        try:
+                            twitter_client = TwitterAPIClient(
+                                client_id=os.getenv('TWITTER_CLIENT_ID'),
+                                client_secret=os.getenv('TWITTER_CLIENT_SECRET')
+                            )
+                            is_valid = twitter_client.auth.validate_user_token(twitter_access_token)
+                            if not is_valid:
+                                twitter_access_token = None
+                        except Exception as e:
+                            logger.error(f"验证Twitter令牌失败: {e}")
+                            twitter_access_token = None
+            except Exception as e:
+                logger.error(f"获取Twitter凭证失败: {e}")
+                twitter_access_token = None
             
-            # 验证Twitter令牌
-            if twitter_access_token:
-                try:
-                    twitter_client = TwitterAPIClient(
-                        client_id=os.getenv('TWITTER_CLIENT_ID'),
-                        client_secret=os.getenv('TWITTER_CLIENT_SECRET')
-                    )
-                    is_valid = twitter_client.auth.validate_user_token(twitter_access_token)
-                    if not is_valid:
-                        twitter_access_token = None
-                except Exception as e:
-                    logger.error(f"验证Twitter令牌失败: {e}")
-                    twitter_access_token = None
-            
+            logger.info(f"创建User对象 - id: {user_data.user_id}, username: {user_data.username}")
             return User(
                 id=user_data.user_id,
                 username=user_data.username,
@@ -132,7 +154,14 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         finally:
             db.close()
             
-    except InvalidTokenError:
+    except InvalidTokenError as e:
+        logger.error(f"Invalid token error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials"
+        )
+    except Exception as e:
+        logger.error(f"Authentication error: {e}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication credentials"
@@ -159,7 +188,9 @@ def get_user_service() -> UserProfileService:
     """Get user service instance"""
     db_session = SessionLocal()
     repository = UserProfileRepository(db_session)
-    return UserProfileService(repository)
+    from database import DataFlowManager
+    data_flow_manager = DataFlowManager(db_session)
+    return UserProfileService(repository, data_flow_manager)
 
 def generate_jwt_token(user_id: str) -> str:
     payload = {

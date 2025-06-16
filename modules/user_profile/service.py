@@ -8,6 +8,7 @@ import hashlib
 import base64
 from datetime import datetime, timedelta
 import os
+import time
 
 from .repository import UserProfileRepository
 from .models import UserProfileData, ProductInfoData, TwitterCredentials, UserRegistration, UserLogin
@@ -61,7 +62,7 @@ class UserProfileService:
         """Update product information"""
         return self.repository.update_product_info(user_id, product_info)
     
-    def get_twitter_auth_url(self, user_id: str) -> Tuple[str, str, str]:
+    def get_twitter_auth_url(self, user_id: str) -> Tuple[str, str]:
         """获取Twitter授权URL"""
         try:
             twitter_client = TwitterAPIClient(
@@ -75,10 +76,11 @@ class UserProfileService:
                 scopes=['tweet.read', 'users.read', 'follows.read', 'follows.write', 'offline.access']
             )
             
-            # 存储code_verifier
-            self._store_code_verifier(state, code_verifier)
+            # 存储code_verifier（安全：不发送给客户端）
+            self._store_code_verifier(state, code_verifier, user_id)
             
-            return auth_url, state, code_verifier
+            # 只返回auth_url和state给客户端，不返回code_verifier
+            return auth_url, state
             
         except Exception as e:
             raise TwitterOAuthError(f"Failed to generate Twitter auth URL: {str(e)}")
@@ -191,17 +193,42 @@ class UserProfileService:
             logger.error(f"Failed to revoke Twitter token: {e}")
             return False
     
-    # 临时存储实现（实际应用中应使用Redis等）
+    # 改进的临时存储实现
     _code_verifiers = {}
     
-    def _store_code_verifier(self, state: str, code_verifier: str):
-        """临时存储code_verifier"""
-        self._code_verifiers[state] = code_verifier
+    def _store_code_verifier(self, state: str, code_verifier: str, user_id: str):
+        """安全存储code_verifier，包含过期时间"""
+        self._code_verifiers[state] = {
+            'code_verifier': code_verifier,
+            'user_id': user_id,
+            'expires_at': time.time() + 600  # 10分钟过期
+        }
+        # 清理过期的验证码
+        self._cleanup_expired_verifiers()
     
     def _get_code_verifier(self, state: str) -> Optional[str]:
-        """获取code_verifier"""
-        return self._code_verifiers.get(state)
+        """获取code_verifier并验证是否过期"""
+        data = self._code_verifiers.get(state)
+        if not data:
+            return None
+        
+        # 检查是否过期
+        if time.time() > data['expires_at']:
+            self._code_verifiers.pop(state, None)
+            return None
+            
+        return data['code_verifier']
     
     def _remove_code_verifier(self, state: str):
         """删除code_verifier"""
         self._code_verifiers.pop(state, None)
+    
+    def _cleanup_expired_verifiers(self):
+        """清理过期的code_verifier"""
+        current_time = time.time()
+        expired_states = [
+            state for state, data in self._code_verifiers.items()
+            if current_time > data['expires_at']
+        ]
+        for state in expired_states:
+            self._code_verifiers.pop(state, None)

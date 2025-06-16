@@ -151,8 +151,8 @@ class TwitterCredential(Base):
     """Twitter凭证模型"""
     __tablename__ = "twitter_credentials"
     
-    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    id = Column(UUID(), primary_key=True, default=uuid.uuid4, nullable=False)
+    founder_id = Column(UUID(), ForeignKey("founders.id"), nullable=False)  # 修复：应该引用 founders.id
     access_token = Column(String(255), nullable=False)
     refresh_token = Column(String(255))
     token_type = Column(String(50), default="Bearer")
@@ -162,6 +162,9 @@ class TwitterCredential(Base):
     twitter_username = Column(String(50))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # 添加关系
+    founder = relationship("Founder", back_populates="twitter_credentials")
     
     def is_expired(self) -> bool:
         """检查令牌是否过期"""

@@ -53,59 +53,6 @@ def find_main_app_file() -> Optional[str]:
     
     return None
 
-def start_server() -> Optional[subprocess.Popen]:
-    """启动API服务器"""
-    print("🚀 启动API服务器...")
-    
-    # 检查是否已有服务器运行
-    if check_port_in_use(8000):
-        print("✅ 检测到端口8000已有服务运行")
-        return None
-    
-    # 查找主应用程序文件
-    main_file = find_main_app_file()
-    if not main_file:
-        print("❌ 未找到主应用程序文件")
-        print("请确保有以下文件之一: main.py, app.py, server.py")
-        return None
-    
-    try:
-        # 尝试使用uvicorn启动
-        if main_file.endswith('.py'):
-            module_name = main_file.replace('/', '.').replace('.py', '')
-            cmd = ['uvicorn', f'{module_name}:app', '--host', '0.0.0.0', '--port', '8000']
-        else:
-            cmd = ['python', main_file]
-            
-        print(f"执行命令: {' '.join(cmd)}")
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=project_root
-        )
-        
-        # 等待服务器启动
-        print("等待服务器启动...")
-        time.sleep(3)
-        
-        # 检查服务器是否成功启动
-        if process.poll() is None:  # 进程仍在运行
-            print("✅ API服务器启动成功")
-            return process
-        else:
-            print("❌ API服务器启动失败")
-            stdout, stderr = process.communicate()
-            print(f"标准输出: {stdout.decode()}")
-            print(f"错误输出: {stderr.decode()}")
-            return None
-            
-    except FileNotFoundError:
-        print("❌ 未找到uvicorn，请安装: pip install uvicorn")
-        return None
-    except Exception as e:
-        print(f"❌ 启动服务器时出错: {e}")
-        return None
 
 def setup_environment():
     """设置环境"""
@@ -166,10 +113,30 @@ DEBUG=true
 
 def run_demo():
     """运行演示"""
-    print("🎯 启动完整工作流程演示...")
+    print("\n🎯 启动完整工作流程演示...")
+    
+    # 等待服务器完全就绪
+    print("⏳ 等待API服务器完全就绪...")
+    max_retries = 30
+    for i in range(max_retries):
+        try:
+            import requests
+            response = requests.get("http://localhost:8000/health", timeout=2)
+            if response.status_code == 200:
+                print("✅ API服务器就绪")
+                break
+        except requests.exceptions.RequestException:
+            pass
+        
+        if i < max_retries - 1:
+            print(f"⏳ 等待中... ({i+1}/{max_retries})")
+            time.sleep(1)
+    else:
+        print("⚠️  API服务器可能未完全就绪，但继续运行demo")
     
     try:
         # 运行演示脚本
+        print("\n🚀 启动演示脚本...")
         cmd = [sys.executable, 'demo_complete_workflow.py', '--demo']
         result = subprocess.run(cmd, cwd=project_root)
         return result.returncode == 0
@@ -210,8 +177,6 @@ def main():
         if not setup_environment():
             sys.exit(1)
         
-        # 2. 启动服务器
-        server_process = start_server()
         
         # 3. 运行演示
         success = run_demo()
@@ -223,8 +188,6 @@ def main():
             
     except KeyboardInterrupt:
         print("\n⚠️  演示被用户中断")
-    finally:
-        cleanup_server(server_process)
     
     print("\n感谢使用SEO工具演示系统！")
 

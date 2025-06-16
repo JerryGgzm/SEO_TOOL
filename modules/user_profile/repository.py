@@ -15,11 +15,10 @@ import bcrypt
 import base64
 import logging
 
-from .models import UserProfileData, ProductInfoData, TwitterCredentials, UserRegistration
+from database.models import Base, TwitterCredential  # 导入统一的TwitterCredential模型
+from .models import UserProfileData, ProductInfoData, TwitterCredentials, UserRegistration, UserLogin
 
 logger = logging.getLogger(__name__)
-
-Base = declarative_base()
 
 class UserProfileTable(Base):
     """User profile table"""
@@ -38,27 +37,12 @@ class UserProfileTable(Base):
     is_active = Column(Boolean, default=True)
     product_info = Column(JSON)  # Store serialized product information
 
-class TwitterCredentialsTable(Base):
-    """Twitter authentication credentials table"""
-    __tablename__ = 'twitter_credentials'
-    
-    user_id = Column(String(36), primary_key=True)
-    encrypted_access_token = Column(Text, nullable=False)
-    encrypted_refresh_token = Column(Text)
-    token_type = Column(String(20), default='Bearer')
-    expires_at = Column(DateTime)
-    scope = Column(String(500))
-    twitter_user_id = Column(String(50))
-    twitter_username = Column(String(50))
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
 class UserProfileRepository:
     """User profile data access layer"""
     
     def __init__(self, db_session: Session):
         self.db_session = db_session
-        self.model_class = TwitterCredentialsTable
+        self.model_class = TwitterCredential  # 使用统一的TwitterCredential模型
         
         # 初始化加密密钥
         encryption_key = os.getenv('ENCRYPTION_KEY')
@@ -173,11 +157,11 @@ class UserProfileRepository:
             encrypted_access_token = self._encrypt_token(credentials.get('access_token'))
             encrypted_refresh_token = self._encrypt_token(credentials.get('refresh_token'))
             
-            # 创建或更新记录
-            existing = self.db_session.query(self.model_class).filter_by(user_id=user_id).first()
+            # 创建或更新记录 - 使用founder_id字段
+            existing = self.db_session.query(self.model_class).filter_by(founder_id=user_id).first()
             if existing:
-                existing.encrypted_access_token = encrypted_access_token
-                existing.encrypted_refresh_token = encrypted_refresh_token
+                existing.access_token = encrypted_access_token  # 直接使用access_token字段
+                existing.refresh_token = encrypted_refresh_token  # 直接使用refresh_token字段
                 existing.token_type = credentials.get('token_type', 'Bearer')
                 existing.expires_at = credentials.get('expires_at')
                 existing.scope = credentials.get('scope')
@@ -186,9 +170,9 @@ class UserProfileRepository:
                 existing.updated_at = datetime.utcnow()
             else:
                 new_credentials = self.model_class(
-                    user_id=user_id,
-                    encrypted_access_token=encrypted_access_token,
-                    encrypted_refresh_token=encrypted_refresh_token,
+                    founder_id=user_id,  # 使用founder_id
+                    access_token=encrypted_access_token,  # 直接使用access_token字段
+                    refresh_token=encrypted_refresh_token,  # 直接使用refresh_token字段
                     token_type=credentials.get('token_type', 'Bearer'),
                     expires_at=credentials.get('expires_at'),
                     scope=credentials.get('scope'),
@@ -205,32 +189,48 @@ class UserProfileRepository:
             self.db_session.rollback()
             return False
     
-    def get_twitter_credentials(self, user_id: str) -> Optional[Dict[str, Any]]:
+    def get_twitter_credentials(self, user_id: str) -> Optional[TwitterCredentials]:
         """获取Twitter凭证"""
         try:
-            credentials = self.db_session.query(self.model_class).filter_by(user_id=user_id).first()
+            credentials = self.db_session.query(self.model_class).filter_by(founder_id=user_id).first()
             if not credentials:
                 return None
             
             # 解密令牌
-            access_token = self._decrypt_token(credentials.encrypted_access_token)
-            refresh_token = self._decrypt_token(credentials.encrypted_refresh_token)
+            access_token = self._decrypt_token(credentials.access_token)
+            refresh_token = self._decrypt_token(credentials.refresh_token)
             
-            return {
-                'access_token': access_token,
-                'refresh_token': refresh_token,
-                'token_type': credentials.token_type,
-                'expires_at': credentials.expires_at,
-                'scope': credentials.scope,
-                'twitter_user_id': credentials.twitter_user_id,
-                'twitter_username': credentials.twitter_username,
-                'created_at': credentials.created_at,
-                'updated_at': credentials.updated_at
-            }
+            return TwitterCredentials(
+                user_id=user_id,
+                access_token=access_token,
+                refresh_token=refresh_token,
+                token_type=credentials.token_type,
+                expires_at=credentials.expires_at,
+                scope=credentials.scope,
+                twitter_user_id=credentials.twitter_user_id,
+                twitter_username=credentials.twitter_username,
+                created_at=credentials.created_at,
+                updated_at=credentials.updated_at
+            )
             
         except Exception as e:
             logger.error(f"获取Twitter凭证失败: {e}")
             return None
+    
+    def delete_twitter_credentials(self, user_id: str) -> bool:
+        """删除Twitter凭证"""
+        try:
+            credentials = self.db_session.query(self.model_class).filter_by(founder_id=user_id).first()
+            if credentials:
+                self.db_session.delete(credentials)
+                self.db_session.commit()
+                return True
+            return True  # 如果不存在也算成功
+            
+        except Exception as e:
+            logger.error(f"删除Twitter凭证失败: {e}")
+            self.db_session.rollback()
+            return False
     
     def _generate_user_id(self) -> str:
         """Generate unique user ID"""
