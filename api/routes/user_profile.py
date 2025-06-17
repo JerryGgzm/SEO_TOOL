@@ -196,7 +196,7 @@ async def update_product_info(
             status_code=status.HTTP_200_OK,
             content={
                 "message": "Product information updated successfully",
-                "product_info": product_info
+                "product_info": product_info.dict()
             }
         )
     except HTTPException:
