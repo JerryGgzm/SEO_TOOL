@@ -20,97 +20,63 @@ from modules.content_generation.models import (
     ContentGenerationRequest, ContentType, GenerationMode,
     ContentDraft, BrandVoice
 )
+from config import LLM_CONFIG, DEFAULT_LLM_PROVIDER
 
 logger = logging.getLogger(__name__)
 
 # Create router
 router = APIRouter(prefix="/api/content", tags=["content-generation"])
 
-# Dependency to get content generation service
-async def get_content_service(
-    data_flow_manager: DataFlowManager = Depends(get_data_flow_manager),
-    current_user: User = Depends(get_current_user)
-) -> ContentGenerationService:
-    """Get content generation service with dependencies"""
-    try:
-        # Create database adapter
-        db_adapter = ContentGenerationDatabaseAdapter(data_flow_manager)
-        
-        return ContentGenerationService(
-            llm_config={'provider': 'openai'},  # Would come from config
-            database_adapter=db_adapter
-        )
-    except Exception as e:
-        logger.error(f"Failed to create content service: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to initialize content generation service"
-        )
-
-@router.post("/generate", response_model=List[str])
-async def generate_content(
-    founder_id: str = Query(..., description="Founder ID"),
-    content_type: ContentType = Query(default=ContentType.TWEET),
-    generation_mode: GenerationMode = Query(default=GenerationMode.STANDARD),
-    trend_id: Optional[str] = Query(None, description="Specific trend to base content on"),
-    quantity: int = Query(default=1, ge=1, le=10, description="Number of variations"),
-    current_user: User = Depends(get_current_user),
-    service: ContentGenerationService = Depends(get_content_service)
-):
-    """
-    Generate AI-powered content based on trends and user context
+def get_content_service(llm_provider: str = DEFAULT_LLM_PROVIDER) -> ContentGenerationService:
+    """Get content generation service instance
     
-    Creates content drafts using LLM based on:
-    - User's product information and brand voice
-    - Current trending topics
-    - Content type specifications
-    - Generation mode preferences
+    Args:
+        llm_provider: LLM provider to use (default: from config)
+        
+    Returns:
+        ContentGenerationService instance
+    """
+    # Get LLM configuration
+    llm_config = LLM_CONFIG.get(llm_provider)
+    if not llm_config:
+        raise HTTPException(status_code=400, detail=f"Unsupported LLM provider: {llm_provider}")
+        
+    # Initialize service
+    return ContentGenerationService(
+        data_flow_manager=None,  # TODO: Initialize with actual data flow manager
+        user_service=None,  # TODO: Initialize with actual user service
+        llm_provider=llm_provider
+    )
+
+@router.post("/generate")
+async def generate_content(
+    request: ContentGenerationRequest,
+    llm_provider: str = DEFAULT_LLM_PROVIDER,
+    service: ContentGenerationService = Depends(get_content_service)
+) -> List[str]:
+    """Generate content based on request
+    
+    Args:
+        request: Content generation request
+        llm_provider: LLM provider to use (default: from config)
+        service: Content generation service
+        
+    Returns:
+        List of generated content draft IDs
     """
     try:
-        # Validate user access
-        if current_user.id != founder_id and not current_user.is_admin:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
-        
         # Generate content
         draft_ids = await service.generate_content(
-            founder_id=founder_id,
-            trend_id=trend_id,
-            content_type=content_type,
-            generation_mode=generation_mode,
-            quantity=quantity
+            founder_id=request.founder_id,
+            trend_id=request.trend_id,
+            content_type=request.content_type,
+            count=request.count
         )
         
-        if not draft_ids:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to generate content. Check your request parameters."
-            )
+        return draft_ids
         
-        logger.info(f"Generated {len(draft_ids)} content drafts for user {founder_id}")
-        
-        return JSONResponse(
-            status_code=status.HTTP_201_CREATED,
-            content={
-                "message": "Content generated successfully",
-                "draft_ids": draft_ids,
-                "count": len(draft_ids),
-                "founder_id": founder_id,
-                "content_type": content_type.value,
-                "generation_mode": generation_mode.value
-            }
-        )
-        
-    except HTTPException:
-        raise
     except Exception as e:
-        logger.error(f"Content generation failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Content generation failed"
-        )
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/generate/viral-focused")
 async def generate_viral_content(

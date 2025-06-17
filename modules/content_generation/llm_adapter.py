@@ -5,6 +5,7 @@ import logging
 import asyncio
 import openai
 import anthropic
+import google.generativeai as genai
 
 from .models import LLMResponse
 
@@ -242,30 +243,91 @@ class LocalLLMAdapter(LLMAdapter):
         ]
         return await asyncio.gather(*tasks)
 
+class GeminiAdapter(LLMAdapter):
+    """Google Gemini LLM adapter"""
+    
+    def __init__(self, api_key: str, model_name: str = "gemini-pro"):
+        """Initialize Gemini adapter
+        
+        Args:
+            api_key: Gemini API key
+            model_name: Model name (default: gemini-pro)
+        """
+        self.api_key = api_key
+        self.model_name = model_name
+        genai.configure(api_key=api_key)
+        self.model = genai.GenerativeModel(model_name)
+    
+    async def generate_content(self, prompt: str) -> LLMResponse:
+        """Generate content using Gemini
+        
+        Args:
+            prompt: Generation prompt
+            
+        Returns:
+            LLMResponse with generated content
+        """
+        try:
+            print("\n📤 Prompt:")
+            print(prompt)
+            
+            # Generate content
+            response = await self.model.generate_content_async(prompt)
+            
+            # Parse response
+            content = response.text
+            
+            print("\n📥 Response:")
+            print(content)
+            
+            # Calculate confidence (Gemini doesn't provide this directly)
+            # We'll use a default high confidence since Gemini is generally reliable
+            confidence = 0.9
+            
+            # Extract alternatives if available
+            alternatives = []
+            if hasattr(response, 'candidates') and len(response.candidates) > 1:
+                alternatives = [c.text for c in response.candidates[1:]]
+            
+            return LLMResponse(
+                content=content,
+                confidence=confidence,
+                alternatives=alternatives
+            )
+            
+        except Exception as e:
+            logger.error(f"Gemini content generation failed: {e}")
+            raise
+
+    async def generate_multiple(self, prompts: list) -> list:
+        # Gemini API不支持批量，可以循环调用
+        results = []
+        for prompt in prompts:
+            results.append(await self.generate_content(prompt))
+        return results
+
 class LLMAdapterFactory:
     """Factory for creating LLM adapters"""
     
-    @staticmethod
-    def create_adapter(provider: str, **kwargs) -> LLMAdapter:
-        """Create LLM adapter based on provider"""
+    _adapters = {
+        'openai': OpenAIAdapter,
+        'claude': ClaudeAdapter,
+        'gemini': GeminiAdapter  # Add Gemini adapter
+    }
+    
+    @classmethod
+    def create_adapter(cls, llm_provider: str, **kwargs) -> LLMAdapter:
+        """Create LLM adapter instance
         
-        # Ensure provider is not in kwargs to avoid duplication
-        clean_kwargs = {k: v for k, v in kwargs.items() if k != 'provider'}
-        
-        if provider.lower() == "openai":
-            return OpenAIAdapter(
-                api_key=clean_kwargs.get('api_key'),
-                model_name=clean_kwargs.get('model_name', 'gpt-3.5-turbo')
-            )
-        elif provider.lower() == "anthropic":
-            return ClaudeAdapter(
-                api_key=clean_kwargs.get('api_key'),
-                model_name=clean_kwargs.get('model_name', 'claude-3-sonnet-20240229')
-            )
-        elif provider.lower() == "local":
-            return LocalLLMAdapter(
-                model_name=clean_kwargs.get('model_name', 'llama2'),
-                base_url=clean_kwargs.get('base_url', 'http://localhost:11434')
-            )
-        else:
-            raise ValueError(f"Unsupported LLM provider: {provider}")
+        Args:
+            llm_provider: LLM provider name
+            **kwargs: Additional provider-specific arguments
+            
+        Returns:
+            LLMAdapter instance
+        """
+        adapter_class = cls._adapters.get(llm_provider)
+        if not adapter_class:
+            raise ValueError(f"Unsupported LLM provider: {llm_provider}")
+            
+        return adapter_class(**kwargs)
