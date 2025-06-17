@@ -27,16 +27,36 @@ from modules.content_generation.models import (
     ContentGenerationRequest, ContentGenerationContext, 
     ContentType, BrandVoice, GenerationMode
 )
-from modules.content_generation.generator import ContentGenerator, ContentGenerationFactory
+from modules.content_generation.generator import ContentGenerator
 from modules.content_generation.service import ContentGenerationService
 from modules.content_generation.quality_checker import ContentQualityChecker
 from modules.content_generation.database_adapter import ContentGenerationDatabaseAdapter
+from modules.content_generation.llm_adapter import LLMAdapterFactory
+from config.llm_config import LLM_CONFIG, DEFAULT_LLM_PROVIDER
 
 # Mock services for demo
 from unittest.mock import Mock, MagicMock
 
 # Load environment variables
 load_dotenv()
+
+def get_llm_config(provider: str = DEFAULT_LLM_PROVIDER) -> Dict[str, Any]:
+    """Get LLM configuration"""
+    config = LLM_CONFIG.get(provider)
+    if not config:
+        print(f"❌ {provider} configuration not found.")
+        return None
+    
+    api_key = config.get('api_key')
+    if not api_key:
+        print(f"❌ {provider} API key not found in environment variables.")
+        return None
+    
+    return {
+        'provider': provider,
+        'api_key': api_key,
+        'model_name': config.get('model_name')
+    }
 
 def get_openai_api_key() -> str:
     """Get OpenAI API key from environment variables"""
@@ -170,10 +190,16 @@ async def demo_basic_content_generation():
         # Create mock database adapter
         db_adapter = MockDatabaseAdapter()
         
+        # Get LLM configuration
+        llm_config = get_llm_config()
+        if not llm_config:
+            return
+        
         # Create content generation service
         service = ContentGenerationService(
-            llm_config={'provider': 'openai'},
-            database_adapter=db_adapter
+            data_flow_manager=None,
+            user_service=None,
+            llm_provider='gemini'
         )
         
         print("🔧 Testing basic content generation...")
@@ -211,8 +237,9 @@ async def demo_generation_modes():
     try:
         db_adapter = MockDatabaseAdapter()
         service = ContentGenerationService(
-            llm_config={'provider': 'openai'},
-            database_adapter=db_adapter
+            data_flow_manager=None,
+            user_service=None,
+            llm_provider='gemini'
         )
         
         modes = [
@@ -267,8 +294,9 @@ async def demo_content_types():
     try:
         db_adapter = MockDatabaseAdapter()
         service = ContentGenerationService(
-            llm_config={'provider': 'openai'},
-            database_adapter=db_adapter
+            data_flow_manager=None,
+            user_service=None,
+            llm_provider='gemini'
         )
         
         content_types = [
@@ -312,8 +340,9 @@ async def demo_quality_assessment():
     try:
         db_adapter = MockDatabaseAdapter()
         service = ContentGenerationService(
-            llm_config={'provider': 'openai'},
-            database_adapter=db_adapter
+            data_flow_manager=None,
+            user_service=None,
+            llm_provider='gemini'
         )
         
         print("🔧 Testing quality assessment...")
@@ -361,8 +390,9 @@ async def demo_brand_voice_customization():
     try:
         db_adapter = MockDatabaseAdapter()
         service = ContentGenerationService(
-            llm_config={'provider': 'openai'},
-            database_adapter=db_adapter
+            data_flow_manager=None,
+            user_service=None,
+            llm_provider='gemini'
         )
         
         print("🔧 Testing brand voice customization...")
@@ -421,8 +451,9 @@ async def demo_draft_management():
     try:
         db_adapter = MockDatabaseAdapter()
         service = ContentGenerationService(
-            llm_config={'provider': 'openai'},
-            database_adapter=db_adapter
+            data_flow_manager=None,
+            user_service=None,
+            llm_provider='gemini'
         )
         
         print("🔧 Testing draft management...")
@@ -487,58 +518,19 @@ def demo_module_configuration():
     print("• Comprehensive content type support")
 
 async def main():
-    """Run all content generation demos"""
-    print("🚀 Content Generation Module Demo")
-    print("=" * 50)
-    
-    # Check API key availability
-    api_key = get_openai_api_key()
-    if api_key:
-        print("✅ OpenAI API key available - running full demos")
-    else:
-        print("⚠️ OpenAI API key not available - running with mock responses")
-    
-    print("\n" + "=" * 50)
+    """Run all demos"""
+    print("\n🚀 Starting Content Generation Module Demo")
+    print("=========================================")
     
     # Run demos
-    try:
-        # Configuration demo (non-async)
-        demo_module_configuration()
-        
-        # Core functionality demos
-        await demo_basic_content_generation()
-        await demo_generation_modes()
-        await demo_content_types()
-        await demo_quality_assessment()
-        await demo_brand_voice_customization()
-        await demo_draft_management()
-        
-    except Exception as e:
-        print(f"❌ Demo execution failed: {e}")
-        import traceback
-        traceback.print_exc()
+    await demo_basic_content_generation()
+    await demo_generation_modes()
+    await demo_content_types()
+    await demo_quality_assessment()
+    await demo_brand_voice_customization()
+    await demo_draft_management()
     
-    print("\n" + "=" * 50)
-    print("🎉 Content Generation Demo Completed!")
-    
-    print("\n🔧 Capabilities Demonstrated:")
-    print("✅ Basic content generation")
-    print("✅ Multiple generation modes")
-    print("✅ Content type handling")
-    print("✅ Quality assessment")
-    print("✅ Brand voice customization")
-    print("✅ Draft management")
-    
-    print("\n💡 Key Features:")
-    print("• Streamlined, focused content generation")
-    print("• Quality-driven approach")
-    print("• Brand consistency maintenance")
-    print("• Flexible generation modes")
-    print("• Comprehensive draft management")
-    
-    print("\n📌 Note:")
-    print("For SEO optimization, use the dedicated SEO module")
-    print("This module focuses purely on content creation and quality")
+    print("\n✨ All demos completed!")
 
 if __name__ == "__main__":
     asyncio.run(main())

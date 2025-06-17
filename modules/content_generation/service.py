@@ -10,6 +10,8 @@ from .models import (
     ContentGenerationContext, BrandVoice, GenerationMode
 )
 from .database_adapter import ContentGenerationDatabaseAdapter
+from .llm_adapter import LLMAdapterFactory
+from config.llm_config import LLM_CONFIG, DEFAULT_LLM_PROVIDER
 
 logger = logging.getLogger(__name__)
 
@@ -18,19 +20,32 @@ class ContentGenerationService:
     Streamlined content generation service focused on content creation
     """
     
-    def __init__(self, 
-                 llm_config: Dict[str, Any],
-                 database_adapter: ContentGenerationDatabaseAdapter):
+    def __init__(self, data_flow_manager, user_service, llm_provider: str = DEFAULT_LLM_PROVIDER):
+        """Initialize service
         
-        self.database_adapter = database_adapter
+        Args:
+            data_flow_manager: Data flow manager instance
+            user_service: User profile service instance
+            llm_provider: LLM provider to use (default: from config)
+        """
+        self.data_flow_manager = data_flow_manager
+        self.user_service = user_service
         
-        # Initialize content generator
-        self.generator = ContentGenerationFactory.create_generator(
-            llm_provider=llm_config.get('provider', 'openai'),
-            llm_config=llm_config
+        # Initialize LLM adapter
+        llm_config = LLM_CONFIG.get(llm_provider)
+        if not llm_config:
+            raise ValueError(f"Unsupported LLM provider: {llm_provider}")
+            
+        self.llm_adapter = LLMAdapterFactory.create_adapter(
+            llm_provider=llm_provider,
+            api_key=llm_config["api_key"],
+            model_name=llm_config["model_name"]
         )
         
-        self.logger = logging.getLogger(__name__)
+        # Initialize content generator
+        self.generator = ContentGenerator(self.llm_adapter)
+        
+        self.database_adapter = ContentGenerationDatabaseAdapter()
     
     async def generate_content(self, founder_id: str, trend_id: str = None,
                              content_type: ContentType = ContentType.TWEET,
