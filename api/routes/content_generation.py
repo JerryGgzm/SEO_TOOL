@@ -20,7 +20,7 @@ from modules.content_generation.models import (
     ContentGenerationRequest, ContentType, GenerationMode,
     ContentDraft, BrandVoice
 )
-from config import LLM_CONFIG, DEFAULT_LLM_PROVIDER
+from config.llm_config import LLM_CONFIG, DEFAULT_LLM_PROVIDER
 
 logger = logging.getLogger(__name__)
 
