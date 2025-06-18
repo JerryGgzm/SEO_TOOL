@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 import logging
 import re
+from abc import ABC, abstractmethod
 
 from modules.seo.models import (
     SEOOptimizationRequest, SEOOptimizationResult, ContentOptimizationSuggestions,
@@ -18,12 +19,171 @@ from modules.seo.models import (
 
 logger = logging.getLogger(__name__)
 
+class LLMResponseParser(ABC):
+    """Abstract base class for LLM response parsing"""
+    
+    @abstractmethod
+    def parse_json_response(self, content: str) -> Optional[str]:
+        """Parse JSON from LLM response"""
+        pass
+    
+    @abstractmethod
+    def get_optimization_prompt(self, base_prompt: str) -> str:
+        """Get optimization-specific prompt for this LLM"""
+        pass
+
+class GeminiResponseParser(LLMResponseParser):
+    """Parser for Gemini responses"""
+    
+    def parse_json_response(self, content: str) -> Optional[str]:
+        """Parse JSON from Gemini response"""
+        if not content:
+            return None
+        
+        content = content.strip()
+        
+        # Remove markdown code blocks
+        if content.startswith('```json'):
+            content = content[7:]  # Remove ```json
+        elif content.startswith('```'):
+            content = content[3:]  # Remove ```
+        
+        if content.endswith('```'):
+            content = content[:-3]  # Remove trailing ```
+        
+        content = content.strip()
+        
+        # Try to parse as JSON
+        try:
+            json.loads(content)
+            return content
+        except json.JSONDecodeError:
+            # Try to extract JSON using regex
+            json_patterns = [
+                r'\{.*\}',  # JSON object
+                r'\[.*\]',  # JSON array
+            ]
+            
+            for pattern in json_patterns:
+                json_match = re.search(pattern, content, re.DOTALL)
+                if json_match:
+                    try:
+                        extracted = json_match.group()
+                        json.loads(extracted)  # Validate
+                        return extracted
+                    except json.JSONDecodeError:
+                        continue
+            
+            return None
+    
+    def get_optimization_prompt(self, base_prompt: str) -> str:
+        """Get optimization prompt for Gemini"""
+        system_prompt = """You are an expert SEO content optimizer. 
+IMPORTANT: You must respond ONLY with valid JSON format. Do not include any text before or after the JSON.
+Do not use markdown formatting, code blocks, or any other formatting.
+Return ONLY the JSON object, nothing else."""
+        
+        return f"{system_prompt}\n\n{base_prompt}"
+
+class OpenAIResponseParser(LLMResponseParser):
+    """Parser for OpenAI responses"""
+    
+    def parse_json_response(self, content: str) -> Optional[str]:
+        """Parse JSON from OpenAI response"""
+        if not content:
+            return None
+        
+        content = content.strip()
+        
+        # OpenAI typically returns cleaner JSON, but may have markdown
+        if content.startswith('```'):
+            content = content[3:]
+        if content.endswith('```'):
+            content = content[:-3]
+        
+        content = content.strip()
+        
+        # Try to parse as JSON
+        try:
+            json.loads(content)
+            return content
+        except json.JSONDecodeError:
+            # Try to extract JSON using regex
+            json_patterns = [
+                r'\{.*\}',  # JSON object
+                r'\[.*\]',  # JSON array
+            ]
+            
+            for pattern in json_patterns:
+                json_match = re.search(pattern, content, re.DOTALL)
+                if json_match:
+                    try:
+                        extracted = json_match.group()
+                        json.loads(extracted)  # Validate
+                        return extracted
+                    except json.JSONDecodeError:
+                        continue
+            
+            return None
+    
+    def get_optimization_prompt(self, base_prompt: str) -> str:
+        """Get optimization prompt for OpenAI"""
+        system_prompt = "You are an expert SEO content optimizer. Provide optimized content that maintains the original message while improving SEO potential."
+        return f"{system_prompt}\n\n{base_prompt}"
+
+class LLMAdapterFactory:
+    """Factory for creating LLM adapters"""
+    
+    _parsers = {
+        'gemini': GeminiResponseParser,
+        'openai': OpenAIResponseParser,
+        'gpt': OpenAIResponseParser,  # Alias for OpenAI
+    }
+    
+    @classmethod
+    def create_parser(cls, llm_provider: str) -> LLMResponseParser:
+        """Create LLM response parser"""
+        parser_class = cls._parsers.get(llm_provider.lower())
+        if not parser_class:
+            # Default to Gemini parser
+            logger.warning(f"Unknown LLM provider: {llm_provider}, using Gemini parser")
+            return GeminiResponseParser()
+        
+        return parser_class()
+    
+    @classmethod
+    def detect_llm_provider(cls, llm_client) -> str:
+        """Detect LLM provider from client"""
+        client_type = type(llm_client).__name__.lower()
+        
+        if 'gemini' in client_type or 'generative' in client_type:
+            return 'gemini'
+        elif 'openai' in client_type or 'gpt' in client_type:
+            return 'openai'
+        else:
+            # Try to detect from client attributes
+            if hasattr(llm_client, 'model') and 'gemini' in str(llm_client.model).lower():
+                return 'gemini'
+            elif hasattr(llm_client, 'model') and ('gpt' in str(llm_client.model).lower() or 'openai' in str(llm_client.model).lower()):
+                return 'openai'
+            else:
+                return 'gemini'  # Default
+
 class LLMSEOIntelligence:
     """LLM-powered SEO intelligence for content optimization"""
     
-    def __init__(self, llm_client=None, model_name: str = "gpt-3.5-turbo"):
+    def __init__(self, llm_client=None, model_name: str = "gemini-2.0-flash-lite", llm_provider: str = None):
         self.llm_client = llm_client
         self.model_name = model_name
+        
+        # Detect LLM provider if not specified
+        if llm_provider is None and llm_client is not None:
+            self.llm_provider = LLMAdapterFactory.detect_llm_provider(llm_client)
+        else:
+            self.llm_provider = llm_provider or 'gemini'
+        
+        # Create appropriate parser
+        self.parser = LLMAdapterFactory.create_parser(self.llm_provider)
         
         # LLM prompting strategies for different optimization aspects
         self.optimization_prompts = {
@@ -63,7 +223,8 @@ class LLMSEOIntelligence:
                 for strategy in strategies:
                     try:
                         result = await self._apply_llm_strategy(strategy, request, context)
-                        optimization_results[strategy] = result
+                        if result:
+                            optimization_results[strategy] = result
                     except Exception as e:
                         logger.warning(f"LLM strategy {strategy} failed: {e}")
                         continue
@@ -77,6 +238,10 @@ class LLMSEOIntelligence:
                 enhanced_content = await self._apply_llm_strategy(
                     optimization_strategy, request, context
                 )
+            
+            # Ensure we have valid content
+            if not enhanced_content:
+                enhanced_content = request.content
             
             # Generate intelligent SEO suggestions
             seo_suggestions = await self._generate_intelligent_seo_suggestions(
@@ -115,7 +280,7 @@ class LLMSEOIntelligence:
         prompt = self.optimization_prompts[strategy](request, context)
         
         # Call LLM
-        enhanced_content = await self._call_llm_for_optimization(prompt)
+        enhanced_content = await self._call_llm(prompt)
         
         return enhanced_content or request.content
     
@@ -314,7 +479,7 @@ Provide SEO suggestions in this exact JSON format:
 Focus on actionable, specific recommendations.
 """
             
-            response = await self._call_llm_for_optimization(prompt)
+            response = await self._call_llm(prompt)
             
             if not response:
                 return self._fallback_seo_suggestions()
@@ -341,30 +506,86 @@ Focus on actionable, specific recommendations.
             logger.error(f"Failed to generate intelligent SEO suggestions: {e}")
             return self._fallback_seo_suggestions()
     
-    async def _call_llm_for_optimization(self, prompt: str) -> str:
-        """Call LLM for content optimization"""
+    async def _call_llm(self, prompt: str) -> str:
+        """Call LLM for analysis"""
         try:
             if not self.llm_client:
+                logger.warning("No LLM client available")
                 return None
             
-            # Use the correct async method name
-            response = await self.llm_client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {
-                        "role": "system", 
-                        "content": "You are an expert SEO content optimizer. Provide optimized content that maintains the original message while improving SEO potential."
-                    },
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=500,
-                temperature=0.3
-            )
+            # Use provider-specific prompt formatting
+            formatted_prompt = self.parser.get_optimization_prompt(prompt)
             
-            return response.choices[0].message.content.strip()
+            # Handle different LLM client types
+            if hasattr(self.llm_client, 'generate_content_async'):
+                # Gemini client
+                response = await self.llm_client.generate_content_async(formatted_prompt)
+                content = response.text
+            elif hasattr(self.llm_client, 'chat'):
+                # OpenAI client
+                response = await self.llm_client.chat.completions.create(
+                    model="gpt-4-turbo-preview",
+                    messages=[
+                        {"role": "system", "content": "You are an expert SEO content optimizer. Provide optimized content that maintains the original message while improving SEO potential."},
+                        {"role": "user", "content": formatted_prompt}
+                    ],
+                    temperature=0.7,
+                    max_tokens=2000
+                )
+                content = response.choices[0].message.content
+            else:
+                logger.warning(f"Unsupported LLM client type: {type(self.llm_client)}")
+                return None
+            
+            if content:
+                # Debug: Log the raw response
+                logger.debug(f"Raw {self.llm_provider} response: {content[:200]}...")
+                
+                # For content optimization prompts, return the content directly
+                if "optimize this" in prompt.lower() or "enhance this" in prompt.lower():
+                    # Clean up the response but return the content
+                    cleaned_content = content.strip()
+                    
+                    # Remove markdown code blocks if present
+                    if cleaned_content.startswith('```json'):
+                        cleaned_content = cleaned_content[7:]
+                    if cleaned_content.startswith('```'):
+                        cleaned_content = cleaned_content[3:]
+                    if cleaned_content.endswith('```'):
+                        cleaned_content = cleaned_content[:-3]
+                    
+                    cleaned_content = cleaned_content.strip()
+                    
+                    # Try to extract content from JSON if it's wrapped
+                    if cleaned_content.startswith('{'):
+                        try:
+                            json_data = json.loads(cleaned_content)
+                            if 'optimized_content' in json_data:
+                                return json_data['optimized_content']
+                        except json.JSONDecodeError:
+                            pass
+                    
+                    # Remove quotes if present
+                    if cleaned_content.startswith('"') and cleaned_content.endswith('"'):
+                        cleaned_content = cleaned_content[1:-1]
+                    
+                    return cleaned_content
+                
+                # For JSON prompts, use the parser
+                cleaned_json = self.parser.parse_json_response(content)
+                
+                if cleaned_json:
+                    logger.debug(f"JSON validation successful for {self.llm_provider}")
+                    return cleaned_json
+                else:
+                    logger.warning(f"LLM response is not valid JSON for {self.llm_provider}, using fallback")
+                    return None
+            else:
+                logger.warning("Empty content from LLM response")
+                return None
             
         except Exception as e:
-            logger.error(f"LLM optimization call failed: {e}")
+            logger.error(f"LLM analysis call failed: {e}")
             return None
     
     def _calculate_llm_optimization_score(self, original: str, enhanced: str,
@@ -466,7 +687,7 @@ Focus on actionable, specific recommendations.
             """
             
             # Get LLM response
-            response = await self._call_llm_for_optimization(analysis_prompt)
+            response = await self._call_llm(analysis_prompt)
             
             # Parse response
             try:
@@ -519,7 +740,7 @@ Focus on actionable, specific recommendations.
             Return as JSON array of strings.
             """
             
-            response = await self._call_llm_for_optimization(variation_prompt)
+            response = await self._call_llm(variation_prompt)
             
             try:
                 variations = json.loads(response)
@@ -539,12 +760,92 @@ Focus on actionable, specific recommendations.
             logger.error(f"Failed to generate content variations: {e}")
             return []
 
+    async def optimize_content(self, content: str, optimization_level: SEOOptimizationLevel = SEOOptimizationLevel.MODERATE,
+                              content_type: SEOContentType = SEOContentType.TWEET,
+                              target_audience: str = None, target_keywords: List[str] = None) -> Optional['SEOOptimizationResult']:
+        """
+        Optimize content using LLM intelligence
+        
+        Args:
+            content: Original content to optimize
+            optimization_level: Level of optimization to apply
+            content_type: Type of content being optimized
+            target_audience: Target audience for the content
+            target_keywords: Keywords to target
+            
+        Returns:
+            SEOOptimizationResult with optimized content and metrics
+        """
+        try:
+            from modules.seo.models import SEOOptimizationRequest, SEOAnalysisContext, SEOOptimizationResult
+            
+            # Create optimization request
+            request = SEOOptimizationRequest(
+                content=content,
+                content_type=content_type,
+                optimization_level=optimization_level,
+                target_keywords=target_keywords or []
+            )
+            
+            # Create analysis context
+            context = SEOAnalysisContext(
+                content_type=content_type,
+                target_audience=target_audience or "general audience",
+                niche_keywords=target_keywords or []
+            )
+            
+            # Enhance content with LLM
+            enhancement_result = await self.enhance_content_with_llm(
+                request=request,
+                context=context,
+                optimization_strategy="comprehensive"
+            )
+            
+            if not enhancement_result:
+                return None
+            
+            # Create optimization result
+            seo_suggestions = enhancement_result.get('seo_suggestions')
+            improvements = []
+            if seo_suggestions and hasattr(seo_suggestions, 'engagement_tactics'):
+                improvements = seo_suggestions.engagement_tactics
+            elif isinstance(seo_suggestions, dict) and 'engagement_tactics' in seo_suggestions:
+                improvements = seo_suggestions['engagement_tactics']
+            
+            result = SEOOptimizationResult(
+                original_content=content,
+                optimized_content=enhancement_result.get('enhanced_content', content),
+                optimization_score=enhancement_result.get('optimization_score', 0.5),
+                estimated_reach_improvement=75.0,  # Default improvement
+                improvements_made=improvements,
+                optimization_metadata={
+                    'llm_model': self.model_name,
+                    'llm_provider': self.llm_provider,
+                    'enhancement_timestamp': datetime.utcnow().isoformat()
+                }
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Content optimization failed: {e}")
+            return None
+
 class LLMSEOAnalyzer:
     """LLM-powered SEO content analysis and insights"""
     
-    def __init__(self, llm_client=None, model_name: str = "gpt-3.5-turbo"):
+    def __init__(self, llm_client=None, model_name: str = "gemini-2.0-flash-lite", llm_provider: str = None):
         self.llm_client = llm_client
         self.model_name = model_name
+        
+        # Detect LLM provider if not specified
+        if llm_provider is None and llm_client is not None:
+            self.llm_provider = LLMAdapterFactory.detect_llm_provider(llm_client)
+        else:
+            self.llm_provider = llm_provider or 'gemini'
+        
+        # Create appropriate parser
+        self.parser = LLMAdapterFactory.create_parser(self.llm_provider)
     
     async def analyze_content_seo_potential(self, content: str, 
                                           context: SEOAnalysisContext) -> Dict[str, Any]:
@@ -673,35 +974,73 @@ Make each variation distinctly different while maintaining the core message.
                 logger.warning("No LLM client available")
                 return None
             
-            # Use the correct async method name
-            response = await self.llm_client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are an expert SEO analyst specializing in social media optimization. "
-                                 "Provide detailed, actionable insights in valid JSON format only. "
-                                 "Do not include any text outside the JSON structure."
-                    },
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=1000,
-                temperature=0.3
-            )
+            # Use provider-specific prompt formatting
+            formatted_prompt = self.parser.get_optimization_prompt(prompt)
             
-            content = response.choices[0].message.content
+            # Handle different LLM client types
+            if hasattr(self.llm_client, 'generate_content_async'):
+                # Gemini client
+                response = await self.llm_client.generate_content_async(formatted_prompt)
+                content = response.text
+            elif hasattr(self.llm_client, 'chat'):
+                # OpenAI client
+                response = await self.llm_client.chat.completions.create(
+                    model="gpt-4-turbo-preview",
+                    messages=[
+                        {"role": "system", "content": "You are an expert SEO content optimizer. Provide optimized content that maintains the original message while improving SEO potential."},
+                        {"role": "user", "content": formatted_prompt}
+                    ],
+                    temperature=0.7,
+                    max_tokens=2000
+                )
+                content = response.choices[0].message.content
+            else:
+                logger.warning(f"Unsupported LLM client type: {type(self.llm_client)}")
+                return None
+            
             if content:
-                content = content.strip()
+                # Debug: Log the raw response
+                logger.debug(f"Raw {self.llm_provider} response: {content[:200]}...")
                 
-                # Remove any markdown code blocks if present
-                if content.startswith('```json'):
-                    content = content[7:]
-                if content.startswith('```'):
-                    content = content[3:]
-                if content.endswith('```'):
-                    content = content[:-3]
+                # For content optimization prompts, return the content directly
+                if "optimize this" in prompt.lower() or "enhance this" in prompt.lower():
+                    # Clean up the response but return the content
+                    cleaned_content = content.strip()
+                    
+                    # Remove markdown code blocks if present
+                    if cleaned_content.startswith('```json'):
+                        cleaned_content = cleaned_content[7:]
+                    if cleaned_content.startswith('```'):
+                        cleaned_content = cleaned_content[3:]
+                    if cleaned_content.endswith('```'):
+                        cleaned_content = cleaned_content[:-3]
+                    
+                    cleaned_content = cleaned_content.strip()
+                    
+                    # Try to extract content from JSON if it's wrapped
+                    if cleaned_content.startswith('{'):
+                        try:
+                            json_data = json.loads(cleaned_content)
+                            if 'optimized_content' in json_data:
+                                return json_data['optimized_content']
+                        except json.JSONDecodeError:
+                            pass
+                    
+                    # Remove quotes if present
+                    if cleaned_content.startswith('"') and cleaned_content.endswith('"'):
+                        cleaned_content = cleaned_content[1:-1]
+                    
+                    return cleaned_content
                 
-                return content.strip()
+                # For JSON prompts, use the parser
+                cleaned_json = self.parser.parse_json_response(content)
+                
+                if cleaned_json:
+                    logger.debug(f"JSON validation successful for {self.llm_provider}")
+                    return cleaned_json
+                else:
+                    logger.warning(f"LLM response is not valid JSON for {self.llm_provider}, using fallback")
+                    return None
             else:
                 logger.warning("Empty content from LLM response")
                 return None
@@ -741,9 +1080,15 @@ Make each variation distinctly different while maintaining the core message.
 class LLMSEOOrchestrator:
     """Main orchestrator for LLM-enhanced SEO optimization"""
     
-    def __init__(self, llm_client=None, model_name: str = "gpt-3.5-turbo"):
-        self.llm_intelligence = LLMSEOIntelligence(llm_client, model_name)
-        self.llm_analyzer = LLMSEOAnalyzer(llm_client, model_name)
+    def __init__(self, llm_client=None, model_name: str = "gemini-2.0-flash-lite", llm_provider: str = None):
+        # Detect LLM provider if not specified
+        if llm_provider is None and llm_client is not None:
+            detected_provider = LLMAdapterFactory.detect_llm_provider(llm_client)
+        else:
+            detected_provider = llm_provider or 'gemini'
+        
+        self.llm_intelligence = LLMSEOIntelligence(llm_client, model_name, detected_provider)
+        self.llm_analyzer = LLMSEOAnalyzer(llm_client, model_name, detected_provider)
     
     async def comprehensive_llm_optimization(self, request: SEOOptimizationRequest,
                                            context: SEOAnalysisContext) -> Dict[str, Any]:
@@ -759,6 +1104,17 @@ class LLMSEOOrchestrator:
             enhancement_result = await self.llm_intelligence.enhance_content_with_llm(
                 request, context, "comprehensive"
             )
+            
+            # Ensure we have valid enhancement result
+            if not enhancement_result:
+                logger.warning("Enhancement result is None, using fallback")
+                enhancement_result = {
+                    'enhanced_content': request.content,
+                    'optimization_score': 0.5,
+                    'seo_suggestions': self.llm_intelligence._fallback_seo_suggestions(),
+                    'llm_insights': {},
+                    'enhancement_metadata': {'strategy_used': 'fallback'}
+                }
             
             # Phase 3: Generate alternative variations
             variations = await self.llm_analyzer.generate_content_variations(
@@ -796,3 +1152,16 @@ class LLMSEOOrchestrator:
                 'optimization_score': 0.5,
                 'error': str(e)
             }
+
+def clean_and_parse_gemini_json(content: str) -> Optional[str]:
+    """
+    Clean and parse JSON from Gemini response (legacy function)
+    
+    Args:
+        content: Raw response from Gemini
+        
+    Returns:
+        Clean JSON string or None if parsing fails
+    """
+    parser = GeminiResponseParser()
+    return parser.parse_json_response(content)

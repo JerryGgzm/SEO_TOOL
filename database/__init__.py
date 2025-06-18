@@ -17,8 +17,8 @@ from .models import (
     TrackedTrendRaw, AutomationRule, PostAnalytic, GeneratedContentDraft
 )
 
-# 确保导入UserProfileTable以便创建表
-from modules.user_profile.repository import UserProfileTable
+# 移除循环导入 - UserProfileTable 在 user_profile.repository 中定义
+# from modules.user_profile.repository import UserProfileTable
 
 from sqlalchemy import create_engine, inspect
 from sqlalchemy.orm import sessionmaker, Session

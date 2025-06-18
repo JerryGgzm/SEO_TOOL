@@ -174,6 +174,11 @@ class SEOOptimizer(BaseSEOOptimizer):
             # Phase 2: Apply comprehensive LLM optimization
             llm_result = await self.llm_orchestrator.comprehensive_llm_optimization(request, context)
             
+            # Check if LLM result is None or empty
+            if not llm_result:
+                logger.warning("LLM optimization returned None, using baseline optimization")
+                return self._create_baseline_seo_result(request, context)
+            
             # Phase 3: Validate and enhance LLM result with traditional SEO principles
             validated_result = self._validate_and_enhance_llm_result(
                 llm_result, baseline_analysis, request, context
@@ -850,6 +855,16 @@ class SEOOptimizer(BaseSEOOptimizer):
                                        context: SEOAnalysisContext) -> Dict[str, Any]:
         """Validate and enhance LLM result with traditional SEO principles"""
         try:
+            # Handle None or empty result
+            if not llm_result:
+                logger.warning("LLM result is None or empty, creating fallback result")
+                return {
+                    'optimized_content': request.content,
+                    'optimization_score': 0.5,
+                    'validation_applied': True,
+                    'fallback_used': True
+                }
+            
             # Ensure content meets basic SEO requirements
             optimized_content = llm_result.get('optimized_content', request.content)
             
@@ -873,7 +888,12 @@ class SEOOptimizer(BaseSEOOptimizer):
             
         except Exception as e:
             logger.warning(f"LLM result validation failed: {e}")
-            return llm_result
+            return {
+                'optimized_content': request.content,
+                'optimization_score': 0.5,
+                'validation_applied': False,
+                'error': str(e)
+            }
     
     def _create_comprehensive_result(self, validated_result: Dict[str, Any],
                                    baseline_analysis: Dict[str, Any],
@@ -881,6 +901,13 @@ class SEOOptimizer(BaseSEOOptimizer):
                                    context: SEOAnalysisContext) -> SEOOptimizationResult:
         """Create comprehensive optimization result"""
         try:
+            # Handle suggestions properly
+            suggestions = validated_result.get('seo_suggestions')
+            if suggestions and hasattr(suggestions, 'engagement_tactics'):
+                suggestions_obj = suggestions
+            else:
+                suggestions_obj = ContentOptimizationSuggestions()
+            
             return SEOOptimizationResult(
                 original_content=request.content,
                 optimized_content=validated_result.get('optimized_content', request.content),
@@ -889,7 +916,7 @@ class SEOOptimizer(BaseSEOOptimizer):
                 hashtag_analysis=[],
                 keyword_analysis=[],
                 estimated_reach_improvement=self._calculate_comprehensive_reach_improvement(validated_result),
-                suggestions=validated_result.get('seo_suggestions', ContentOptimizationSuggestions()),
+                suggestions=suggestions_obj,
                 optimization_metadata={
                     'optimization_mode': 'comprehensive',
                     'llm_enhanced': True,
@@ -1237,3 +1264,6 @@ def create_enhanced_seo_optimizer(twitter_client=None, config: Dict[str, Any] = 
         config=config,
         llm_client=llm_client
     )
+
+# Alias for backward compatibility
+EnhancedSEOOptimizer = SEOOptimizer
