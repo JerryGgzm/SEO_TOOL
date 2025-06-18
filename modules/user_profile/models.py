@@ -41,29 +41,11 @@ class ContentStylePreferences(BaseModel):
 
 class ProductInfoData(BaseModel):
     """Product information data model"""
-    product_name: str = Field(..., min_length=1, max_length=100)
-    tagline: Optional[str] = Field(None, max_length=200, description="Product tagline")
-    description: str = Field(..., min_length=10, max_length=1000)
-    core_features: List[str] = Field(..., min_items=1, description="Core features")
-    unique_selling_points: List[str] = Field(..., min_items=1, description="Unique selling points")
-    core_values: List[str] = Field(..., min_items=1, description="Core values")
-    target_audience_description: str = Field(..., min_length=10, description="Target audience profile")
-    brand_story: Optional[str] = Field(None, max_length=2000, description="Brand story")
-    key_messages: List[str] = Field(default=[], description="Key messages to convey")
-    niche_keywords: ProductKeywords
-    competitors: Optional[List[CompetitorInfo]] = Field(default=[])
-    reference_influencers: Optional[List[InfluencerReference]] = Field(default=[])
-    website_url: Optional[HttpUrl] = None
-    pricing_model: Optional[str] = None
-    target_markets: Optional[List[str]] = Field(default=[], description="Target markets/regions")
-    industry_category: Optional[str] = None
-    content_style_preferences: ContentStylePreferences = Field(default_factory=ContentStylePreferences)
-    
-    @validator('core_features', 'unique_selling_points', 'core_values')
-    def validate_lists_not_empty(cls, v):
-        if not v or all(not item.strip() for item in v):
-            raise ValueError("List cannot be empty and items cannot be empty strings")
-        return [item.strip() for item in v if item.strip()]
+    company_name: Optional[str] = Field(None, max_length=100, description="Company name")
+    product_name: str = Field(..., min_length=1, max_length=100, description="Product name")
+    product_description: Optional[str] = Field(None, max_length=1000, description="Product description")
+    industry: Optional[str] = Field(None, max_length=50, description="Industry category")
+    brand_voice: Optional[str] = Field(None, max_length=50, description="Brand voice style")
 
 class UserProfileData(BaseModel):
     """User profile data model"""

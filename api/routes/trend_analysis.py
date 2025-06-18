@@ -3,23 +3,25 @@
 This module implements the FastAPI routes for trend analysis,
 handling Twitter trending topics extraction, LLM matching, and database storage.
 """
+import logging
+import os
+from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
+
+from dotenv import load_dotenv
 from fastapi import APIRouter, Depends, HTTPException, Query, Path, status
 from fastapi.responses import JSONResponse
-import logging
-from datetime import datetime, timedelta
 
 from database import get_data_flow_manager, DataFlowManager, get_db_session
 from api.middleware import get_current_user, User
-
 from modules.trend_analysis.repository import TrendAnalysisRepository
 from modules.twitter_api import TwitterAPIClient
 from modules.user_profile import UserProfileService
 from modules.user_profile.repository import UserProfileRepository
 
-logger = logging.getLogger(__name__)
-from dotenv import load_dotenv
+# Load environment variables
 load_dotenv('.env')
+logger = logging.getLogger(__name__)
 
 # Create router
 router = APIRouter(prefix="/api/trends", tags=["trend-analysis"])
@@ -77,7 +79,6 @@ async def fetch_and_store_trending_topics(
         credentials = await get_twitter_credentials(current_user)
         
         # 2. 初始化Twitter客户端
-        import os
         twitter_client = TwitterAPIClient(
             client_id=os.getenv('TWITTER_CLIENT_ID'),
             client_secret=os.getenv('TWITTER_CLIENT_SECRET')
@@ -616,38 +617,287 @@ async def get_trending_status(
     repository: TrendAnalysisRepository = Depends(get_trend_repository)
 ):
     """
-    获取trending topics的状态信息
+    获取trending analysis系统状态
     """
     try:
-        # 获取统计信息
-        total_cached = await repository.get_user_trends_count(current_user.id)
+        # 获取数据库统计信息
+        total_topics = await repository.get_topics_count()
+        recent_topics = await repository.get_recent_topics_count(hours=24)
         
-        # 获取最新的topic时间
-        latest_topic = await repository.get_latest_trend_for_user(current_user.id)
-        latest_time = latest_topic.analyzed_at.isoformat() if latest_topic and latest_topic.analyzed_at else None
-        
-        # 检查Twitter凭证状态
-        twitter_connected = False
-        try:
-            await get_twitter_credentials(current_user)
-            twitter_connected = True
-        except HTTPException:
-            pass
+        # 获取最近的topics示例
+        sample_topics = await repository.get_recent_topics(
+            limit=3,
+            user_id=current_user.id
+        )
         
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={
-                "message": "Trending topics status retrieved successfully",
-                "total_cached_topics": total_cached,
-                "latest_topic_time": latest_time,
-                "twitter_connected": twitter_connected,
+                "status": "active",
+                "total_topics_stored": total_topics,
+                "topics_last_24h": recent_topics,
+                "sample_recent_topics": [
+                    {
+                        "topic_name": topic.topic_name,
+                        "relevance_score": topic.relevance_score,
+                        "created_at": topic.created_at.isoformat() if topic.created_at else None
+                    }
+                    for topic in sample_topics
+                ],
+                "last_updated": datetime.now().isoformat()
+            }
+        )
+    
+    except Exception as e:
+        logger.error(f"Failed to get trending status: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get trending status"
+        )
+
+
+# ===== 新的Gemini-powered API端点 =====
+
+@router.post("/gemini/analyze")
+async def analyze_trending_topics_with_gemini(
+    keywords: List[str] = Query(..., description="用户关键词列表 (例如: ['AI', '效率', '创业'])"),
+    user_context: Optional[str] = Query(None, description="可选的用户背景信息"),
+    max_topics: int = Query(default=5, ge=1, le=10, description="返回的最大话题数量"),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    使用Google Gemini分析基于关键词的互联网热门话题
+    
+    这是新的主要功能：
+    1. 接收用户的关键词（如 "AI", "效率" 等）
+    2. 使用Gemini LLM和Google Custom Search API
+    3. 返回当前互联网上最热门的相关话题
+    """
+    try:
+        # 验证Google API配置
+        from config.settings import settings
+        if not settings.validate_google_apis():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Google API配置不完整。请联系管理员配置GEMINI_API_KEY、SEARCH_API_KEY和SEARCH_ENGINE_ID"
+            )
+        
+        # 输入验证
+        if not keywords or len(keywords) == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="请提供至少一个关键词"
+            )
+        
+        if len(keywords) > 10:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="关键词数量不能超过10个"
+            )
+        
+        logger.info(f"用户 {current_user.id} 请求分析关键词: {keywords}")
+        
+        # 创建Gemini分析器
+        from modules.trend_analysis import create_gemini_trend_analyzer
+        analyzer = create_gemini_trend_analyzer()
+        
+        # 执行分析
+        analysis_result = analyzer.analyze_trending_topics(
+            keywords=keywords,
+            user_context=user_context
+        )
+        
+        if not analysis_result["success"]:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"分析失败: {analysis_result.get('error', '未知错误')}"
+            )
+        
+        # 返回结果
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "success": True,
+                "keywords": keywords,
+                "user_context": user_context,
+                "analysis": analysis_result["analysis"],
+                "search_query_used": analysis_result.get("search_query", ""),
+                "function_called": analysis_result.get("function_called"),
+                "has_search_results": analysis_result.get("search_results") is not None,
+                "timestamp": analysis_result["timestamp"],
+                "user_id": current_user.id
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Gemini分析过程中发生错误: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"分析过程中发生内部错误: {str(e)}"
+        )
+
+
+@router.post("/gemini/summary")
+async def get_trending_topics_summary_with_gemini(
+    keywords: List[str] = Query(..., description="用户关键词列表"),
+    user_context: Optional[str] = Query(None, description="用户背景信息"),
+    max_topics: int = Query(default=5, ge=1, le=10, description="最大话题数量"),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    获取结构化的热门话题总结（包含标题、描述、相关性评分等）
+    """
+    try:
+        # 验证配置
+        from config.settings import settings
+        if not settings.validate_google_apis():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Google API配置不完整"
+            )
+        
+        # 输入验证
+        if not keywords:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="请提供关键词"
+            )
+        
+        logger.info(f"用户 {current_user.id} 请求结构化总结，关键词: {keywords}")
+        
+        # 创建分析器并获取总结
+        from modules.trend_analysis import create_gemini_trend_analyzer
+        analyzer = create_gemini_trend_analyzer()
+        
+        summary_result = analyzer.get_trending_summary(
+            keywords=keywords,
+            max_topics=max_topics,
+            user_context=user_context
+        )
+        
+        if not summary_result["success"]:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"获取总结失败: {summary_result.get('error', '未知错误')}"
+            )
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "success": True,
+                "keywords": keywords,
+                "max_topics": max_topics,
+                "raw_analysis": summary_result["raw_analysis"],
+                "structured_summary": summary_result.get("structured_summary"),
+                "summary_error": summary_result.get("summary_error"),
+                "has_search_results": summary_result.get("search_results") is not None,
+                "timestamp": summary_result["timestamp"],
+                "user_id": current_user.id
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取总结时发生错误: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取总结时发生内部错误: {str(e)}"
+        )
+
+
+@router.get("/gemini/quick-demo")
+async def quick_demo_trending_analysis(
+    current_user: User = Depends(get_current_user)
+):
+    """
+    快速演示Gemini热门话题分析功能
+    使用预设的关键词进行演示
+    """
+    try:
+        # 预设的演示关键词
+        demo_keywords = ["AI", "创业", "效率工具"]
+        demo_context = "科技创业者，关注最新的技术趋势和商业机会"
+        
+        logger.info(f"用户 {current_user.id} 请求快速演示")
+        
+        # 快速分析
+        from modules.trend_analysis import quick_analyze_trending_topics
+        
+        result = quick_analyze_trending_topics(
+            keywords=demo_keywords,
+            user_context=demo_context
+        )
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "demo": True,
+                "message": "这是一个演示，展示基于关键词的热门话题分析",
+                "demo_keywords": demo_keywords,
+                "demo_context": demo_context,
+                "result": result,
+                "note": "要使用自定义关键词，请调用 /api/trends/gemini/analyze 端点",
                 "user_id": current_user.id
             }
         )
         
     except Exception as e:
-        logger.error(f"Failed to get trending status: {e}")
+        logger.error(f"演示过程中发生错误: {e}")
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "demo": True,
+                "success": False,
+                "error": str(e),
+                "message": "演示失败，可能是因为缺少Google API配置",
+                "note": "请确保设置了GEMINI_API_KEY、GOOGLE_SEARCH_API_KEY和GOOGLE_SEARCH_ENGINE_ID环境变量"
+            }
+        )
+
+
+@router.get("/gemini/config-check")
+async def check_gemini_configuration(
+    current_user: User = Depends(get_current_user)
+):
+    """
+    检查Gemini配置状态
+    """
+    try:
+        from config.settings import settings
+        
+        config_status = {
+            "gemini_api_key": bool(settings.GEMINI_API_KEY),
+            "google_search_api_key": bool(settings.GOOGLE_SEARCH_API_KEY),
+            "google_search_engine_id": bool(settings.GOOGLE_SEARCH_ENGINE_ID),
+        }
+        
+        all_configured = all(config_status.values())
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "configured": all_configured,
+                "config_status": config_status,
+                "message": "所有配置完整" if all_configured else "部分配置缺失",
+                "required_env_vars": [
+                    "GEMINI_API_KEY",
+                    "GOOGLE_SEARCH_API_KEY", 
+                    "GOOGLE_SEARCH_ENGINE_ID"
+                ],
+                "instructions": {
+                    "gemini_api_key": "从 Google AI Studio 获取",
+                    "google_search_api_key": "从 Google Cloud Console 创建",
+                    "google_search_engine_id": "从 Programmable Search Engine 获取"
+                }
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"检查配置时发生错误: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get trending status: {str(e)}"
+            detail="无法检查配置状态"
         )

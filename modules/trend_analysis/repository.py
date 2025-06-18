@@ -426,3 +426,43 @@ class TrendAnalysisRepository:
             expires_at=trend_table.expires_at,
             tags=trend_table.tags or []
         )
+    
+    # ===== 新增的方法，支持Gemini API端点 =====
+    
+    async def get_topics_count(self) -> int:
+        """获取数据库中所有话题的总数"""
+        try:
+            count = self.db_session.query(AnalyzedTrendTable).count()
+            return count
+        except Exception as e:
+            logger.error(f"Failed to get total topics count: {e}")
+            return 0
+    
+    async def get_recent_topics_count(self, hours: int = 24) -> int:
+        """获取最近N小时内的话题数量"""
+        try:
+            since_time = datetime.utcnow() - timedelta(hours=hours)
+            count = self.db_session.query(AnalyzedTrendTable).filter(
+                AnalyzedTrendTable.analyzed_at >= since_time
+            ).count()
+            return count
+        except Exception as e:
+            logger.error(f"Failed to get recent topics count: {e}")
+            return 0
+    
+    async def get_recent_topics(self, limit: int = 10, user_id: str = None) -> List[AnalyzedTrendTable]:
+        """获取最近的话题列表"""
+        try:
+            query = self.db_session.query(AnalyzedTrendTable)
+            
+            if user_id:
+                query = query.filter(AnalyzedTrendTable.user_id == user_id)
+            
+            topics = query.order_by(
+                AnalyzedTrendTable.analyzed_at.desc()
+            ).limit(limit).all()
+            
+            return topics
+        except Exception as e:
+            logger.error(f"Failed to get recent topics: {e}")
+            return []
