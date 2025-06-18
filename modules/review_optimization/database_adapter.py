@@ -7,6 +7,9 @@ from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 import json
 import logging
+import aiosqlite
+import uuid
+import sqlite3
 
 from .models import (
     ContentDraftReview, ReviewDecision, DraftStatus, ContentPriority,
@@ -582,3 +585,294 @@ class ReviewOptimizationDatabaseAdapter:
         except Exception as e:
             logger.error(f"Failed to extract metadata: {e}")
             return {}
+
+class ReviewOptimizationSQLiteAdapter:
+    def __init__(self, db_path="ideation_db.sqlite"):
+        self.db_path = db_path
+
+    async def _get_conn(self):
+        return await aiosqlite.connect(self.db_path)
+
+    def _serialize(self, value):
+        return json.dumps(value, default=str) if value is not None else None
+
+    def _deserialize(self, value):
+        if value is None:
+            return None
+        try:
+            return json.loads(value)
+        except Exception:
+            return value
+
+    async def create_draft(self, draft: ContentDraftReview) -> str:
+        draft_id = draft.id or str(uuid.uuid4())
+        async with await self._get_conn() as conn:
+            await conn.execute('''
+                INSERT INTO generated_content_drafts (
+                    id, founder_id, content_type, generated_text, edited_text, current_content, status, ai_generation_metadata,
+                    seo_suggestions, tags, analyzed_trend_id, quality_score, edit_history, review_feedback, reviewed_at, reviewer_id,
+                    review_decision, scheduled_post_time, posted_at, posted_tweet_id, created_at, updated_at, priority
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                draft_id,
+                draft.founder_id,
+                draft.content_type,
+                draft.original_content,
+                draft.current_content if draft.current_content != draft.original_content else None,
+                draft.current_content,
+                draft.status.value,
+                self._serialize(draft.generation_metadata),
+                self._serialize(draft.seo_suggestions),
+                self._serialize(draft.tags),
+                draft.trend_id,
+                draft.quality_score,
+                self._serialize([edit.model_dump() for edit in draft.edit_history]),
+                self._serialize(draft.review_feedback.model_dump() if draft.review_feedback else None),
+                draft.reviewed_at.isoformat() if draft.reviewed_at else None,
+                draft.reviewer_id,
+                draft.review_decision.value if draft.review_decision else None,
+                draft.scheduled_time.isoformat() if draft.scheduled_time else None,
+                draft.posted_at.isoformat() if draft.posted_at else None,
+                draft.posted_tweet_id,
+                draft.created_at.isoformat() if draft.created_at else datetime.utcnow().isoformat(),
+                draft.updated_at.isoformat() if draft.updated_at else datetime.utcnow().isoformat(),
+                draft.priority.value if draft.priority else ContentPriority.MEDIUM.value
+            ))
+            await conn.commit()
+        return draft_id
+
+    async def get_pending_content_drafts(self, founder_id: str, limit: int = 10, offset: int = 0) -> List[Any]:
+        async with await self._get_conn() as conn:
+            cursor = await conn.execute('''
+                SELECT * FROM generated_content_drafts WHERE founder_id = ? AND status = ?
+                ORDER BY created_at ASC LIMIT ? OFFSET ?
+            ''', (founder_id, DraftStatus.PENDING_REVIEW.value, limit, offset))
+            rows = await cursor.fetchall()
+            return [self._row_to_obj(row, cursor) for row in rows]
+
+    async def get_content_draft_by_id(self, draft_id: str) -> Optional[Any]:
+        async with await self._get_conn() as conn:
+            cursor = await conn.execute('SELECT * FROM generated_content_drafts WHERE id = ?', (draft_id,))
+            row = await cursor.fetchone()
+            if not row:
+                return None
+            return self._row_to_obj(row, cursor)
+
+    async def update_content_draft(self, draft_id: str, update_data: Dict[str, Any]) -> bool:
+        # update_data: dict of field -> value
+        fields = []
+        values = []
+        for k, v in update_data.items():
+            if k in ["ai_generation_metadata", "seo_suggestions", "tags", "edit_history", "review_feedback"]:
+                v = self._serialize(v)
+            elif isinstance(v, datetime):
+                v = v.isoformat()
+            elif isinstance(v, Enum):
+                v = v.value
+            fields.append(f'{k} = ?')
+            values.append(v)
+        values.append(draft_id)
+        async with await self._get_conn() as conn:
+            await conn.execute(f'UPDATE generated_content_drafts SET {", ".join(fields)} WHERE id = ?', values)
+            await conn.commit()
+        return True
+
+    async def get_review_history(self, founder_id: str, status: Optional[str] = None, limit: int = 20, offset: int = 0) -> List[Any]:
+        query = 'SELECT * FROM generated_content_drafts WHERE founder_id = ?'
+        params = [founder_id]
+        if status:
+            query += ' AND status = ?'
+            params.append(status)
+        query += ' ORDER BY reviewed_at DESC LIMIT ? OFFSET ?'
+        params.extend([limit, offset])
+        async with await self._get_conn() as conn:
+            cursor = await conn.execute(query, params)
+            rows = await cursor.fetchall()
+            return [self._row_to_obj(row, cursor) for row in rows]
+
+    async def get_review_summary_data(self, founder_id: str, days: int = 30) -> Dict[str, Any]:
+        # 统计近days天的审核数据
+        async with await self._get_conn() as conn:
+            cursor = await conn.execute('''
+                SELECT status, COUNT(*) as count, AVG(quality_score) as avg_quality, GROUP_CONCAT(tags) as all_tags
+                FROM generated_content_drafts
+                WHERE founder_id = ? AND created_at >= ?
+                GROUP BY status
+            ''', (founder_id, (datetime.utcnow() - timedelta(days=days)).isoformat()))
+            rows = await cursor.fetchall()
+            summary = {row[0]: row[1] for row in rows}
+            avg_quality = rows[0][2] if rows else 0.0
+            all_tags = []
+            for row in rows:
+                if row[3]:
+                    try:
+                        all_tags.extend(json.loads(row[3]))
+                    except Exception:
+                        pass
+            return {
+                'pending_count': summary.get(DraftStatus.PENDING_REVIEW.value, 0),
+                'approved_count': summary.get(DraftStatus.APPROVED.value, 0),
+                'rejected_count': summary.get(DraftStatus.REJECTED.value, 0),
+                'edited_count': summary.get(DraftStatus.EDITING.value, 0),
+                'avg_quality_score': avg_quality or 0.0,
+                'common_tags': list(set(all_tags))
+            }
+
+    async def get_detailed_review_analytics(self, founder_id: str, days: int = 30) -> Dict[str, Any]:
+        # 统计近days天的详细审核数据
+        async with await self._get_conn() as conn:
+            cursor = await conn.execute('''
+                SELECT status, content_type, COUNT(*) as count, AVG(quality_score) as avg_quality
+                FROM generated_content_drafts
+                WHERE founder_id = ? AND created_at >= ?
+                GROUP BY status, content_type
+            ''', (founder_id, (datetime.utcnow() - timedelta(days=days)).isoformat()))
+            rows = await cursor.fetchall()
+            decision_breakdown = {}
+            content_type_breakdown = {}
+            for row in rows:
+                status, content_type, count, avg_quality = row
+                decision_breakdown[status] = decision_breakdown.get(status, 0) + count
+                content_type_breakdown[content_type] = content_type_breakdown.get(content_type, 0) + count
+            return {
+                'total_reviews': sum(decision_breakdown.values()),
+                'decision_breakdown': decision_breakdown,
+                'content_type_breakdown': content_type_breakdown,
+                'avg_review_time_minutes': 8.5,  # mock
+                'quality_trend': [],
+                'top_rejection_reasons': [],
+            }
+
+    def _row_to_obj(self, row, cursor):
+        # 将sqlite row转为类似ORM对象，便于db_adapter.from_database_format使用
+        col_names = [desc[0] for desc in cursor.description]
+        obj = type('DBRow', (), {})()
+        for idx, col in enumerate(col_names):
+            val = row[idx]
+            if col in ["ai_generation_metadata", "seo_suggestions", "tags", "edit_history", "review_feedback"]:
+                val = self._deserialize(val)
+            setattr(obj, col, val)
+        return obj
+
+class ReviewOptimizationSQLiteSyncAdapter:
+    def __init__(self, db_path="ideation_db.sqlite"):
+        self.db_path = db_path
+        self._ensure_table()
+
+    def _get_conn(self):
+        return sqlite3.connect(self.db_path)
+
+    def _ensure_table(self):
+        with self._get_conn() as conn:
+            conn.execute("""
+            CREATE TABLE IF NOT EXISTS generated_content_drafts (
+                id TEXT PRIMARY KEY,
+                founder_id TEXT,
+                content_type TEXT,
+                generated_text TEXT,
+                current_content TEXT,
+                status TEXT,
+                priority TEXT,
+                tags TEXT,
+                analyzed_trend_id TEXT,
+                ai_generation_metadata TEXT,
+                seo_suggestions TEXT,
+                quality_score REAL,
+                edit_history TEXT,
+                review_feedback TEXT,
+                reviewed_at TEXT,
+                reviewer_id TEXT,
+                review_decision TEXT,
+                scheduled_post_time TEXT,
+                posted_at TEXT,
+                posted_tweet_id TEXT,
+                created_at TEXT,
+                updated_at TEXT
+            )
+            """)
+
+    def create_draft(self, draft: ContentDraftReview) -> str:
+        draft_id = draft.id or str(uuid.uuid4())
+        with self._get_conn() as conn:
+            conn.execute("""
+                INSERT INTO generated_content_drafts (
+                    id, founder_id, content_type, generated_text, current_content, status, priority, tags,
+                    analyzed_trend_id, ai_generation_metadata, seo_suggestions, quality_score, edit_history,
+                    review_feedback, reviewed_at, reviewer_id, review_decision, scheduled_post_time, posted_at,
+                    posted_tweet_id, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                draft_id,
+                draft.founder_id,
+                draft.content_type,
+                draft.original_content,
+                draft.current_content,
+                draft.status.value,
+                draft.priority.value,
+                json.dumps(draft.tags),
+                draft.trend_id,
+                json.dumps(draft.generation_metadata),
+                json.dumps(draft.seo_suggestions),
+                draft.quality_score,
+                json.dumps([e.model_dump() for e in draft.edit_history]),
+                json.dumps(draft.review_feedback.model_dump() if draft.review_feedback else None),
+                draft.reviewed_at.isoformat() if draft.reviewed_at else None,
+                draft.reviewer_id,
+                draft.review_decision.value if draft.review_decision else None,
+                draft.scheduled_time.isoformat() if draft.scheduled_time else None,
+                draft.posted_at.isoformat() if draft.posted_at else None,
+                draft.posted_tweet_id,
+                draft.created_at.isoformat() if draft.created_at else datetime.utcnow().isoformat(),
+                draft.updated_at.isoformat() if draft.updated_at else datetime.utcnow().isoformat()
+            ))
+        return draft_id
+
+    def get_pending_content_drafts(self, founder_id: str, limit: int = 10):
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM generated_content_drafts WHERE founder_id = ? AND status = ? ORDER BY created_at ASC LIMIT ?",
+                (founder_id, DraftStatus.PENDING_REVIEW.value, limit)
+            )
+            rows = cursor.fetchall()
+            return [self._row_to_obj(row, cursor) for row in rows]
+
+    def get_content_draft_by_id(self, draft_id: str):
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                "SELECT * FROM generated_content_drafts WHERE id = ?",
+                (draft_id,)
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return self._row_to_obj(row, cursor)
+
+    def update_content_draft(self, draft_id: str, update_data: dict) -> bool:
+        fields = []
+        values = []
+        for k, v in update_data.items():
+            if k in ["ai_generation_metadata", "seo_suggestions", "tags", "edit_history", "review_feedback"]:
+                v = json.dumps(v)
+            elif isinstance(v, datetime):
+                v = v.isoformat()
+            elif hasattr(v, 'value'):
+                v = v.value
+            fields.append(f'{k} = ?')
+            values.append(v)
+        values.append(draft_id)
+        with self._get_conn() as conn:
+            conn.execute(f'UPDATE generated_content_drafts SET {", ".join(fields)} WHERE id = ?', values)
+        return True
+
+    def _row_to_obj(self, row, cursor):
+        col_names = [desc[0] for desc in cursor.description]
+        obj = type('DBRow', (), {})()
+        for idx, col in enumerate(col_names):
+            val = row[idx]
+            if col in ["ai_generation_metadata", "seo_suggestions", "tags", "edit_history", "review_feedback"]:
+                try:
+                    val = json.loads(val) if val else None
+                except Exception:
+                    pass
+            setattr(obj, col, val)
+        return obj

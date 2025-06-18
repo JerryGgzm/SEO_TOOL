@@ -2,578 +2,317 @@
 
 This demo showcases the key features of the review optimization module,
 including content review workflows, batch operations, and analytics.
+
+Command: python -m modules.review_optimization.review_optimization_demo
 """
-import asyncio
+import sys
+import sqlite3
 import json
-from datetime import datetime, timedelta
-from typing import List, Dict, Any
+from datetime import datetime
+from typing import Dict, Any
 
-# Mock imports for demo purposes
-class MockDataFlowManager:
-    """Mock DataFlowManager for demo"""
-    
-    def __init__(self):
-        self.drafts = {}
-        self.next_id = 1
-    
-    def create_mock_draft(self, founder_id: str, content: str, content_type: str = "trend_analysis"):
-        """Create a mock draft for demo"""
-        draft_id = f"draft_{self.next_id}"
-        self.next_id += 1
-        
-        draft_data = {
-            'id': draft_id,
-            'founder_id': founder_id,
-            'content_type': content_type,
-            'generated_text': content,
-            'current_content': content,
-            'status': 'pending_review',
-            'priority': 'medium',
-            'created_at': datetime.utcnow(),
-            'updated_at': datetime.utcnow(),
-            'tags': [],
-            'analyzed_trend_id': f"trend_{self.next_id}",
-            'ai_generation_metadata': {'quality_score': 0.75 + (self.next_id % 3) * 0.1},
-            'seo_suggestions': {'keywords': ['AI', 'startup'], 'hashtags': ['#AI', '#startup']},
-            'quality_score': 0.75 + (self.next_id % 3) * 0.1,
-            'edit_history': [],
-            'review_feedback': None,
-            'reviewed_at': None,
-            'reviewer_id': None,
-            'review_decision': None
-        }
-        
-        self.drafts[draft_id] = draft_data
-        return draft_id
-    
-    def get_pending_content_drafts(self, founder_id: str, limit: int, offset: int):
-        """Get pending drafts"""
-        pending = [d for d in self.drafts.values() 
-                  if d['founder_id'] == founder_id and d['status'] == 'pending_review']
-        return pending[offset:offset + limit]
-    
-    def get_content_draft_by_id(self, draft_id: str):
-        """Get draft by ID"""
-        return self.drafts.get(draft_id)
-    
-    def update_content_draft(self, draft_id: str, update_data: Dict[str, Any]):
-        """Update draft"""
-        if draft_id in self.drafts:
-            self.drafts[draft_id].update(update_data)
-            return True
-        return False
+from modules.review_optimization.models import (
+    ContentDraftReview, ReviewDecision, ReviewDecisionRequest, BatchReviewRequest, BatchReviewDecision,
+    ContentRegenerationRequest, DraftStatus, ContentPriority
+)
+from modules.review_optimization.database_adapter import ReviewOptimizationSQLiteSyncAdapter
+from modules.content_generation.models import ContentDraft
 
+MENU = """
+==== Review Optimization Demo ====
+1. 创建草稿
+2. 查看待审核草稿
+3. 审核草稿
+4. 批量审核
+5. 内容再生成
+6. 查看审核统计
+7. 退出
+"""
 
-class MockContentGenerationService:
-    """Mock content generation service"""
-    
-    async def regenerate_content_with_seo_feedback(self, draft_id: str, founder_id: str, 
-                                                  feedback: str, preferences: Dict[str, Any]):
-        """Mock content regeneration"""
-        return [f"regenerated_{draft_id}"]
+def print_section(title: str):
+    print(f"\n{'=' * 50}\n{title}\n{'=' * 50}")
 
+def input_with_default(prompt, default):
+    val = input(f"{prompt} (默认: {default}): ").strip()
+    return val if val else default
 
-class MockAnalyticsCollector:
-    """Mock analytics collector"""
-    
-    async def record_event(self, event_data: Dict[str, Any]):
-        """Mock event recording"""
-        print(f"📊 Analytics Event: {event_data['event_type']}")
+def ensure_table():
+    with sqlite3.connect("ideation_db.sqlite") as conn:
+        conn.execute("DROP TABLE IF EXISTS generated_content_drafts;")
+        conn.execute("""
+CREATE TABLE generated_content_drafts (
+    id TEXT PRIMARY KEY,
+    founder_id TEXT,
+    content_type TEXT,
+    generated_text TEXT,
+    current_content TEXT,
+    status TEXT,
+    priority TEXT,
+    tags TEXT,
+    analyzed_trend_id TEXT,
+    ai_generation_metadata TEXT,
+    seo_suggestions TEXT,
+    quality_score REAL,
+    edit_history TEXT,
+    review_feedback TEXT,
+    reviewed_at TEXT,
+    reviewer_id TEXT,
+    review_decision TEXT,
+    scheduled_post_time TEXT,
+    posted_at TEXT,
+    posted_tweet_id TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
+""")
 
+ensure_table()
 
-# Import the actual review optimization modules
-try:
-    from modules.review_optimization.service import ReviewOptimizationService
-    from modules.review_optimization.models import (
-        ReviewDecision, DraftStatus, ContentPriority,
-        ReviewDecisionRequest, BatchReviewRequest, BatchReviewDecision,
-        ContentRegenerationRequest, StatusUpdateRequest
-    )
-    MODULES_AVAILABLE = True
-except ImportError:
-    MODULES_AVAILABLE = False
-    print("⚠️  Review optimization modules not available. Running demo with mock data only.")
+def main():
+    print("🎉 欢迎使用 Review Optimization Module 终端演示！（同步版）")
+    db_adapter = ReviewOptimizationSQLiteSyncAdapter()
+    founder_id = "demo_founder"
 
-
-class ReviewOptimizationDemo:
-    """Demo class for review optimization features"""
-    
-    def __init__(self):
-        self.mock_data_manager = MockDataFlowManager()
-        self.mock_content_service = MockContentGenerationService()
-        self.mock_analytics = MockAnalyticsCollector()
-        
-        if MODULES_AVAILABLE:
-            self.service = ReviewOptimizationService(
-                data_flow_manager=self.mock_data_manager,
-                content_generation_service=self.mock_content_service,
-                analytics_collector=self.mock_analytics
-            )
-        
-        self.founder_id = "demo_founder_123"
-        self.demo_content = [
-            {
-                "content": "🚀 5 Key Insights for AI Startups\n\nAfter conducting in-depth market research, I've discovered several important AI startup opportunities:\n\n1. Vertical AI applications still have enormous potential\n2. Data quality is more important than algorithm complexity\n3. User experience is the key to AI product success\n\nWhich field do you think has the most potential?\n\n#AI #Startup #TechTrends",
-                "type": "trend_analysis"
-            },
-            {
-                "content": "💡 Sharing a Practical Product Growth Tip\n\nYesterday I chatted with a successful entrepreneur and learned a great growth strategy...\n\nThe key is to focus on user value, not the number of features.\n\n#Product #Growth #StartupExperience",
-                "type": "experience_sharing"
-            },
-            {
-                "content": "📈 Latest Market Report Shows: AI Investment Up 150% YoY in Q1 2024\n\nWhat trends does this number reflect? As entrepreneurs, how should we seize this opportunity?\n\n#MarketAnalysis #AIInvestment #StartupOpportunity",
-                "type": "news_commentary"
-            }
-        ]
-    
-    def print_header(self, title: str):
-        """Print demo section header"""
-        print(f"\n{'='*60}")
-        print(f"🎯 {title}")
-        print(f"{'='*60}")
-    
-    def print_step(self, step: str):
-        """Print demo step"""
-        print(f"\n📋 {step}")
-        print("-" * 40)
-    
-    async def setup_demo_data(self):
-        """Setup demo data"""
-        self.print_header("Setting Up Demo Data")
-        
-        # Create demo drafts
-        self.draft_ids = []
-        for i, content_data in enumerate(self.demo_content):
-            draft_id = self.mock_data_manager.create_mock_draft(
-                self.founder_id, 
-                content_data["content"], 
-                content_data["type"]
-            )
-            self.draft_ids.append(draft_id)
-            print(f"✅ Created draft {draft_id}: {content_data['type']}")
-        
-        print(f"\n🎉 Successfully created {len(self.draft_ids)} demo drafts")
-    
-    async def demo_get_pending_drafts(self):
-        """Demo getting pending drafts"""
-        self.print_header("Getting Pending Drafts")
-        
-        if not MODULES_AVAILABLE:
-            print("⚠️  Modules not available, showing mock data")
-            pending_drafts = self.mock_data_manager.get_pending_content_drafts(self.founder_id, 10, 0)
-            for draft in pending_drafts:
-                print(f"📄 Draft {draft['id']}: {draft['content_type']}")
-                print(f"   Content preview: {draft['current_content'][:50]}...")
-                print(f"   Quality score: {draft['quality_score']}")
-            return
-        
-        self.print_step("Calling get_pending_drafts API")
-        
-        try:
-            pending_drafts = await self.service.get_pending_drafts(self.founder_id, limit=5)
-            
-            print(f"📊 Found {len(pending_drafts)} pending drafts:")
-            
-            for draft in pending_drafts:
-                print(f"\n📄 Draft ID: {draft.id}")
-                print(f"   Type: {draft.content_type}")
-                print(f"   Status: {draft.status.value}")
-                print(f"   Priority: {draft.priority.value}")
-                print(f"   Content preview: {draft.current_content[:50]}...")
-                print(f"   Quality score: {draft.quality_score}")
-                print(f"   Created: {draft.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
-                
-        except Exception as e:
-            print(f"❌ Error: {e}")
-    
-    async def demo_review_decisions(self):
-        """Demo review decisions"""
-        self.print_header("Review Decision Demo")
-        
-        if not MODULES_AVAILABLE or len(self.draft_ids) < 3:
-            print("⚠️  Modules not available or insufficient data, showing simulated review process")
-            self._simulate_review_decisions()
-            return
-        
-        # Demo different types of decisions
-        decisions = [
-            {
-                "draft_id": self.draft_ids[0],
-                "decision": ReviewDecision.APPROVE,
-                "feedback": "High quality content, ready for publication",
-                "tags": ["AI", "startup", "insights"]
-            },
-            {
-                "draft_id": self.draft_ids[1],
-                "decision": ReviewDecision.EDIT_AND_APPROVE,
-                "edited_content": "💡 Sharing a Practical Product Growth Tip\n\nYesterday I had an in-depth conversation with a successful entrepreneur and learned a very effective growth strategy:\n\n🎯 The key is to focus on core user value, not blindly stacking features.\n\nWhat challenges have you encountered in product growth? Feel free to share!\n\n#Product #Growth #StartupExperience #UserValue",
-                "feedback": "Added more details and interactive elements, optimized formatting"
-            },
-            {
-                "draft_id": self.draft_ids[2],
-                "decision": ReviewDecision.REJECT,
-                "feedback": "Content is too simple, needs more in-depth analysis and data support"
-            }
-        ]
-        
-        for i, decision_data in enumerate(decisions):
-            self.print_step(f"Processing Review Decision {i+1}")
-            
-            try:
-                request = ReviewDecisionRequest(**decision_data)
-                
-                print(f"📝 Draft: {decision_data['draft_id']}")
-                print(f"🎯 Decision: {decision_data['decision'].value}")
-                print(f"💬 Feedback: {decision_data['feedback']}")
-                
-                if decision_data['decision'] == ReviewDecision.EDIT_AND_APPROVE:
-                    print(f"✏️  Edited content preview: {decision_data['edited_content'][:100]}...")
-                
-                success = await self.service.submit_review_decision(
-                    decision_data['draft_id'], 
-                    self.founder_id, 
-                    request
-                )
-                
-                if success:
-                    print("✅ Review decision processed successfully")
-                else:
-                    print("❌ Review decision processing failed")
-                    
-            except Exception as e:
-                print(f"❌ Error: {e}")
-    
-    def _simulate_review_decisions(self):
-        """Simulate review decisions for demo"""
-        decisions = [
-            {"type": "APPROVE", "reason": "High quality content, ready for publication"},
-            {"type": "EDIT_AND_APPROVE", "reason": "Ready for publication after minor edits"},
-            {"type": "REJECT", "reason": "Needs more in-depth analysis"}
-        ]
-        
-        for i, decision in enumerate(decisions):
-            print(f"\n📝 Draft {i+1}:")
-            print(f"   Decision: {decision['type']}")
-            print(f"   Reason: {decision['reason']}")
-            print("   ✅ Processing complete")
-    
-    async def demo_batch_review(self):
-        """Demo batch review operations"""
-        self.print_header("Batch Review Demo")
-        
-        if not MODULES_AVAILABLE:
-            print("⚠️  Modules not available, showing simulated batch review")
-            print("📦 Simulating batch review of 5 drafts:")
-            for i in range(5):
-                print(f"   📄 Draft {i+1}: Approved")
-            return
-        
-        self.print_step("Creating Batch Review Request")
-        
-        # Create more demo drafts for batch review
-        batch_draft_ids = []
-        for i in range(3):
-            content = f"Batch review demo content {i+1} - This is an in-depth analysis of AI technology development..."
-            draft_id = self.mock_data_manager.create_mock_draft(
-                self.founder_id, content, "batch_demo"
-            )
-            batch_draft_ids.append(draft_id)
-        
-        batch_decisions = [
-            BatchReviewDecision(
-                draft_id=batch_draft_ids[0],
-                decision=ReviewDecision.APPROVE,
-                feedback="Good content quality"
-            ),
-            BatchReviewDecision(
-                draft_id=batch_draft_ids[1],
-                decision=ReviewDecision.APPROVE,
-                feedback="Suitable for publication"
-            ),
-            BatchReviewDecision(
-                draft_id=batch_draft_ids[2],
-                decision=ReviewDecision.REJECT,
-                feedback="Needs more data support"
-            )
-        ]
-        
-        batch_request = BatchReviewRequest(decisions=batch_decisions)
-        
-        print(f"📦 Batch processing {len(batch_decisions)} review decisions:")
-        for decision in batch_decisions:
-            print(f"   📄 {decision.draft_id}: {decision.decision.value}")
-        
-        try:
-            results = await self.service.submit_batch_review_decisions(
-                self.founder_id, batch_request
-            )
-            
-            print(f"\n📊 Batch review results:")
-            success_count = sum(1 for success in results.values() if success)
-            total_count = len(results)
-            
-            print(f"   ✅ Success: {success_count}/{total_count}")
-            print(f"   ❌ Failed: {total_count - success_count}/{total_count}")
-            
-            for draft_id, success in results.items():
-                status = "✅" if success else "❌"
-                print(f"   {status} {draft_id}")
-                
-        except Exception as e:
-            print(f"❌ Batch review error: {e}")
-    
-    async def demo_content_regeneration(self):
-        """Demo content regeneration"""
-        self.print_header("Content Regeneration Demo")
-        
-        if not MODULES_AVAILABLE or not self.draft_ids:
-            print("⚠️  Modules not available, showing simulated regeneration")
-            print("🔄 Simulating content regeneration:")
-            print("   Original: 5 Key Insights for AI Startups...")
-            print("   Regenerated: In-Depth AI Startup Analysis: 5 Core Insights and Practical Recommendations...")
-            print("   ✅ Regeneration complete")
-            return
-        
-        self.print_step("Requesting Content Regeneration")
-        
-        regeneration_request = ContentRegenerationRequest(
-            feedback="Good direction, but needs more specific cases and data support, tone should be more professional",
-            style_preferences={
-                "tone": "professional",
-                "length": "detailed",
-                "include_examples": True
-            },
-            target_improvements=[
-                "Add specific success cases",
-                "Quote latest market data",
-                "Include actionable recommendations"
-            ],
-            keep_elements=[
-                "Core viewpoint structure",
-                "Question-guided ending"
-            ],
-            avoid_elements=[
-                "Overly colloquial expressions",
-                "Unsupported claims"
-            ]
+    # 自动生成测试草稿
+    print_section("自动生成测试草稿")
+    demo_contents = [
+        ("AI创业5大趋势洞察", "trend_analysis"),
+        ("产品增长实战经验分享", "experience_sharing"),
+        ("2024年AI投资市场报告", "news_commentary")
+    ]
+    for content, ctype in demo_contents:
+        draft = ContentDraftReview(
+            founder_id=founder_id,
+            content_type=ctype,
+            original_content=content,
+            current_content=content
         )
-        
-        draft_id = self.draft_ids[0]
-        print(f"🎯 Regenerating draft: {draft_id}")
-        print(f"💬 Feedback requirements: {regeneration_request.feedback}")
-        print(f"🎨 Style preferences: {regeneration_request.style_preferences}")
-        print(f"📈 Improvement targets: {regeneration_request.target_improvements}")
-        
-        try:
-            result = await self.service.regenerate_content(
-                draft_id, self.founder_id, regeneration_request
+        db_adapter.create_draft(draft)
+        print(f"✅ 已生成草稿: {content} [{ctype}]")
+
+    while True:
+        print(MENU)
+        choice = input("请选择操作: ").strip()
+        if choice == "1":
+            print_section("创建草稿")
+            content = input_with_default("请输入内容", "新内容草稿")
+            ctype = input_with_default("内容类型(trend_analysis/experience_sharing/news_commentary)", "trend_analysis")
+            draft = ContentDraftReview(
+                founder_id=founder_id,
+                content_type=ctype,
+                original_content=content,
+                current_content=content
             )
-            
-            if result:
-                print(f"\n✅ Regeneration successful!")
-                print(f"📄 New content preview: {result.new_content[:150]}...")
-                print(f"🔧 Improvements made: {result.improvements_made}")
-                print(f"⭐ Quality score: {result.quality_score}")
+            db_adapter.create_draft(draft)
+            print("✅ 草稿创建成功！")
+        elif choice == "2":
+            print_section("待审核草稿列表")
+            drafts = db_adapter.get_pending_content_drafts(founder_id, limit=10)
+            if not drafts:
+                print("暂无待审核草稿。")
+            for d in drafts:
+                print(f"ID: {d.id} | 类型: {d.content_type} | 状态: {getattr(d, 'status', '')} | 内容: {getattr(d, 'current_content', '')[:30]}")
+        elif choice == "3":
+            print_section("审核草稿")
+            drafts = db_adapter.get_pending_content_drafts(founder_id, limit=10)
+            if not drafts:
+                print("暂无待审核草稿。")
+                continue
+            for idx, d in enumerate(drafts):
+                print(f"{idx+1}. ID: {d.id} | 内容: {getattr(d, 'current_content', '')[:30]}")
+            idx = int(input_with_default("选择要审核的草稿编号", "1")) - 1
+            draft = drafts[idx]
+            print(f"草稿内容: {getattr(draft, 'current_content', '')}")
+            print("审核决策: 1-通过 2-编辑并通过 3-拒绝")
+            dec = input_with_default("选择决策", "1")
+            update_data = {}
+            if dec == "1":
+                update_data = {
+                    "status": DraftStatus.APPROVED.value,
+                    "review_decision": ReviewDecision.APPROVE.value,
+                    "updated_at": datetime.utcnow().isoformat()
+                }
+                print("✅ 审核通过！")
+            elif dec == "2":
+                new_content = input_with_default("请输入编辑后内容", getattr(draft, 'current_content', ''))
+                update_data = {
+                    "status": DraftStatus.APPROVED.value,
+                    "review_decision": ReviewDecision.EDIT_AND_APPROVE.value,
+                    "current_content": new_content,
+                    "updated_at": datetime.utcnow().isoformat()
+                }
+                print("✅ 编辑并通过！")
             else:
-                print("❌ Regeneration failed")
-                
-        except Exception as e:
-            print(f"❌ Regeneration error: {e}")
-    
-    async def demo_analytics_and_insights(self):
-        """Demo analytics and insights"""
-        self.print_header("Analytics Reports and Insights")
-        
-        if not MODULES_AVAILABLE:
-            self._simulate_analytics()
-            return
-        
-        self.print_step("Getting Review Summary")
-        
-        try:
-            summary = await self.service.get_review_summary(self.founder_id, days=30)
-            
-            print(f"📊 Review summary for past 30 days:")
-            print(f"   📝 Pending: {summary.total_pending}")
-            print(f"   ✅ Approved: {summary.total_approved}")
-            print(f"   ❌ Rejected: {summary.total_rejected}")
-            print(f"   ✏️  Edited: {summary.total_edited}")
-            print(f"   ⭐ Average quality score: {summary.avg_quality_score:.2f}")
-            print(f"   📈 Approval rate: {summary.approval_rate:.1f}%")
-            print(f"   🏷️  Common tags: {summary.most_common_tags}")
-            print(f"   ⚡ Review velocity: {summary.review_velocity:.1f} posts/day")
-            
-        except Exception as e:
-            print(f"❌ Summary retrieval error: {e}")
-        
-        self.print_step("Getting Detailed Analytics Data")
-        
-        try:
-            analytics = await self.service.get_review_analytics(self.founder_id, days=30)
-            
-            print(f"📈 Detailed analytics data (past {analytics.period_days} days):")
-            print(f"   📊 Total reviews: {analytics.total_reviews}")
-            print(f"   🎯 Decision breakdown: {analytics.decision_breakdown}")
-            print(f"   📝 Content type breakdown: {analytics.content_type_breakdown}")
-            print(f"   ⏱️  Average review time: {analytics.average_review_time_minutes:.1f} minutes")
-            print(f"   📉 Top rejection reasons: {analytics.top_rejection_reasons}")
-            print(f"   🚀 Productivity metrics: {analytics.productivity_metrics}")
-            
-        except Exception as e:
-            print(f"❌ Analytics data retrieval error: {e}")
-    
-    def _simulate_analytics(self):
-        """Simulate analytics for demo"""
-        print("📊 Simulated analytics report:")
-        print("   📝 Pending: 5")
-        print("   ✅ Approved: 23")
-        print("   ❌ Rejected: 2")
-        print("   ✏️  Edited: 8")
-        print("   ⭐ Average quality score: 0.84")
-        print("   📈 Approval rate: 91.2%")
-        print("   🏷️  Common tags: ['AI', 'startup', 'technology', 'product', 'growth']")
-        print("   ⚡ Review velocity: 2.3 posts/day")
-        
-        print("\n📈 Productivity metrics:")
-        print("   🎯 Review efficiency: Very high")
-        print("   ✅ Quality trend: Improving")
-        print("   📊 Edit rate: 21%")
-        print("   🔄 Regeneration rate: 5%")
-    
-    async def demo_workflow_scenarios(self):
-        """Demo real-world workflow scenarios"""
-        self.print_header("Real-World Workflow Scenario Demo")
-        
-        scenarios = [
-            {
-                "name": "Morning Review Routine",
-                "description": "Daily morning review and processing of pending content",
-                "steps": [
-                    "Check pending review queue",
-                    "Sort by priority",
-                    "Quick review of high-quality content",
-                    "Detailed editing of content needing improvement",
-                    "Reject content that doesn't meet standards"
-                ]
-            },
-            {
-                "name": "Batch Content Preparation",
-                "description": "Prepare a batch of content for next week",
-                "steps": [
-                    "Generate multiple content drafts",
-                    "Batch review and edit",
-                    "Schedule publication times",
-                    "Set priorities",
-                    "Prepare backup content"
-                ]
-            },
-            {
-                "name": "Quality Optimization Process",
-                "description": "Optimize content quality based on data feedback",
-                "steps": [
-                    "Analyze historical performance data",
-                    "Identify high-performing content patterns",
-                    "Regenerate low-quality content",
-                    "Update content strategy",
-                    "Set new quality standards"
-                ]
-            }
-        ]
-        
-        for i, scenario in enumerate(scenarios, 1):
-            print(f"\n🎬 Scenario {i}: {scenario['name']}")
-            print(f"📝 Description: {scenario['description']}")
-            print("🔄 Execution steps:")
-            
-            for j, step in enumerate(scenario['steps'], 1):
-                print(f"   {j}. {step}")
-                await asyncio.sleep(0.5)  # Simulate processing time
-                print(f"      ✅ Complete")
-            
-            print(f"🎉 Scenario {i} execution complete!")
-    
-    async def demo_best_practices(self):
-        """Demo best practices and tips"""
-        self.print_header("Best Practices and Recommendations")
-        
-        best_practices = [
-            {
-                "category": "📝 Content Review",
-                "tips": [
-                    "Set clear quality standards and checklists",
-                    "Prioritize time-sensitive content",
-                    "Maintain consistency in review standards",
-                    "Record common issues to improve generation quality"
-                ]
-            },
-            {
-                "category": "⚡ Efficiency Optimization",
-                "tips": [
-                    "Use batch operations for similar content",
-                    "Establish templates and standard formats",
-                    "Set reasonable review time windows",
-                    "Leverage data insights to optimize workflows"
-                ]
-            },
-            {
-                "category": "📊 Quality Control",
-                "tips": [
-                    "Regularly analyze content performance data",
-                    "Adjust generation parameters based on feedback",
-                    "Maintain a high-standard content library",
-                    "Continuously optimize SEO and user experience"
-                ]
-            },
-            {
-                "category": "🔄 Continuous Improvement",
-                "tips": [
-                    "Collect and analyze user feedback",
-                    "Test different content styles",
-                    "Follow industry trends and best practices",
-                    "Regularly review and update strategies"
-                ]
-            }
-        ]
-        
-        for practice in best_practices:
-            print(f"\n{practice['category']}")
-            for tip in practice['tips']:
-                print(f"   💡 {tip}")
-    
-    async def run_full_demo(self):
-        """Run the complete demo"""
-        print("🎉 Welcome to the Review Optimization Module Demo!")
-        print("This demo will showcase the complete workflow for content review and optimization.")
-        
-        await self.setup_demo_data()
-        await self.demo_get_pending_drafts()
-        await self.demo_review_decisions()
-        await self.demo_batch_review()
-        await self.demo_content_regeneration()
-        await self.demo_analytics_and_insights()
-        await self.demo_workflow_scenarios()
-        await self.demo_best_practices()
-        
-        self.print_header("Demo Complete")
-        print("🎊 Congratulations! You've learned about the main features of the Review Optimization Module:")
-        print("   ✅ Content review and decisions")
-        print("   ✅ Batch operations")
-        print("   ✅ Content regeneration")
-        print("   ✅ Analytics and insights")
-        print("   ✅ Workflow optimization")
-        print("\n📚 Recommended next steps:")
-        print("   1. Check the API documentation for detailed interfaces")
-        print("   2. Run test cases to verify functionality")
-        print("   3. Integrate into your application")
-        print("   4. Customize workflows according to your needs")
+                update_data = {
+                    "status": DraftStatus.REJECTED.value,
+                    "review_decision": ReviewDecision.REJECT.value,
+                    "updated_at": datetime.utcnow().isoformat()
+                }
+                print("✅ 已拒绝！")
+            db_adapter.update_content_draft(draft.id, update_data)
+        elif choice == "4":
+            print_section("批量审核")
+            drafts = db_adapter.get_pending_content_drafts(founder_id, limit=5)
+            if not drafts:
+                print("暂无待审核草稿。")
+                continue
+            for d in drafts:
+                print(f"ID: {d.id} | 内容: {getattr(d, 'current_content', '')[:30]}")
+                dec = input_with_default(f"草稿[{d.id}]决策(1-通过 2-编辑并通过 3-拒绝)", "1")
+                update_data = {}
+                if dec == "1":
+                    update_data = {
+                        "status": DraftStatus.APPROVED.value,
+                        "review_decision": ReviewDecision.APPROVE.value,
+                        "updated_at": datetime.utcnow().isoformat()
+                    }
+                    print(f"✅ {d.id} 审核通过！")
+                elif dec == "2":
+                    new_content = input_with_default("请输入编辑后内容", getattr(d, 'current_content', ''))
+                    update_data = {
+                        "status": DraftStatus.APPROVED.value,
+                        "review_decision": ReviewDecision.EDIT_AND_APPROVE.value,
+                        "current_content": new_content,
+                        "updated_at": datetime.utcnow().isoformat()
+                    }
+                    print(f"✅ {d.id} 编辑并通过！")
+                else:
+                    update_data = {
+                        "status": DraftStatus.REJECTED.value,
+                        "review_decision": ReviewDecision.REJECT.value,
+                        "updated_at": datetime.utcnow().isoformat()
+                    }
+                    print(f"✅ {d.id} 已拒绝！")
+                db_adapter.update_content_draft(d.id, update_data)
+        elif choice == "5":
+            print_section("内容再生成")
+            from modules.content_generation.service import ContentGenerationService
+            from modules.content_generation.models import ContentType, GenerationMode, ContentGenerationRequest, ContentGenerationContext, BrandVoice
+            from config.llm_config import DEFAULT_LLM_PROVIDER
 
+            if not hasattr(main, "_content_service"):
+                main._content_service = ContentGenerationService(
+                    data_flow_manager=None, user_service=None, llm_provider=DEFAULT_LLM_PROVIDER
+                )
+            content_service = main._content_service
 
-async def main():
-    """Main demo function"""
-    demo = ReviewOptimizationDemo()
-    await demo.run_full_demo()
+            drafts = db_adapter.get_pending_content_drafts(founder_id, limit=5)
+            if not drafts:
+                print("暂无可再生成草稿。")
+                continue
+            for idx, d in enumerate(drafts):
+                print(f"{idx+1}. ID: {d.id} | 内容: {getattr(d, 'current_content', '')[:30]}")
+            idx = int(input_with_default("选择要再生成的草稿编号", "1")) - 1
+            draft = drafts[idx]
+            # 构造再生成专用prompt
+            from modules.content_generation.prompts import PromptEngine
+            original_content = getattr(draft, 'current_content', '')
+            feedback = input_with_default("请输入再生需求/反馈", "需要更多数据支持")
+            custom_instruction = (
+                "你是资深内容优化专家。请根据以下原始草稿和用户反馈，对草稿进行优化和重写，确保内容更有深度、更具吸引力，并满足反馈要求。\n\n"
+                f"【原始草稿】：\n{original_content}\n\n"
+                f"【用户反馈/优化要求】：\n{feedback}\n\n"
+                "请输出优化后的完整内容，保持原有主题，但提升表达质量和专业性。"
+            )
 
+            import asyncio
+
+            async def regenerate_content_custom():
+                req = ContentGenerationRequest(
+                    founder_id=founder_id,
+                    content_type=ContentType.TWEET,
+                    generation_mode=GenerationMode.STANDARD,
+                    quantity=1,
+                    custom_prompt=custom_instruction
+                )
+                context = ContentGenerationContext(
+                    trend_info=None,
+                    product_info={},
+                    brand_voice=BrandVoice(),
+                    recent_content=[],
+                    successful_patterns=[],
+                    target_audience=None,
+                    content_preferences={}
+                )
+                prompt_engine = PromptEngine()
+                # 用自定义prompt生成最终prompt
+                custom_prompt = prompt_engine.create_custom_prompt(custom_instruction, context)
+                try:
+                    # 直接用llm_adapter生成内容
+                    raw_content = await content_service.generator.llm_adapter.generate_content(custom_prompt)
+                    # 清洗内容
+                    cleaned_content = content_service.generator._clean_generated_content(raw_content, ContentType.TWEET)
+                    # 质量评估
+                    if content_service.generator.quality_checker:
+                        temp_draft = ContentDraft(
+                            founder_id=founder_id,
+                            content_type=ContentType.TWEET,
+                            generated_text=cleaned_content,
+                            quality_score=0.0
+                        )
+                        quality_assessment = await content_service.generator.quality_checker.assess_quality(temp_draft, context)
+                        quality_score = quality_assessment.overall_score
+                    else:
+                        quality_score = 0.7
+                    if quality_score < 0.6:
+                        print(f"⚠️ 质量分过低: {quality_score:.2f}")
+                        # return None # 如果不想返回低质量内容，取消这里的注释
+                    return cleaned_content
+                except Exception as e:
+                    print(f"❌ 大模型调用失败: {e}")
+                return None
+
+            try:
+                new_content = asyncio.run(regenerate_content_custom())
+            except Exception as e:
+                print(f"❌ 大模型调用失败: {e}")
+                new_content = None
+
+            if new_content:
+                print("\n📄 大模型生成的新内容：\n" + "="*40)
+                print(new_content)
+                print("="*40)
+                confirm = input_with_default("是否用该内容覆盖草稿？(y/n)", "y")
+                if confirm.lower() == "y":
+                    update_data = {
+                        "current_content": new_content,
+                        "updated_at": datetime.utcnow().isoformat()
+                    }
+                    db_adapter.update_content_draft(draft.id, update_data)
+                    print("✅ 草稿已更新为大模型生成的新内容！")
+                else:
+                    print("未更新草稿。")
+            else:
+                print("❌ 再生成失败")
+        elif choice == "6":
+            print_section("审核统计")
+            with sqlite3.connect("ideation_db.sqlite") as conn:
+                cursor = conn.execute("SELECT status, COUNT(*) FROM generated_content_drafts GROUP BY status")
+                status_counts = {row[0]: row[1] for row in cursor.fetchall()}
+                total = sum(status_counts.values())
+                print(f"总草稿数: {total}")
+                for status in [
+                    DraftStatus.PENDING_REVIEW.value,
+                    DraftStatus.APPROVED.value,
+                    DraftStatus.REJECTED.value,
+                    DraftStatus.EDITING.value,
+                    DraftStatus.SCHEDULED.value,
+                    DraftStatus.POSTED.value
+                ]:
+                    print(f"{status}: {status_counts.get(status, 0)}")
+                # 已编辑数
+                cursor = conn.execute("SELECT COUNT(*) FROM generated_content_drafts WHERE review_decision = ?", (ReviewDecision.EDIT_AND_APPROVE.value,))
+                edited_count = cursor.fetchone()[0]
+                print(f"已编辑数: {edited_count}")
+                # 平均质量分
+                cursor = conn.execute("SELECT AVG(quality_score) FROM generated_content_drafts WHERE quality_score IS NOT NULL")
+                avg_score = cursor.fetchone()[0]
+                print(f"平均质量分: {avg_score:.2f}" if avg_score is not None else "平均质量分: 无")
+        elif choice == "7":
+            print("退出 demo。再见！")
+            break
+        else:
+            print("无效选择，请重试。")
 
 if __name__ == "__main__":
-    print("🚀 Starting Review Optimization Module Demo...")
-    asyncio.run(main()) 
+    main() 
