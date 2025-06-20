@@ -1010,7 +1010,7 @@ async def audit_content_seo(
             )
         
         # Validate user access
-        if content_data.founder_id != current_user.id and not current_user.is_admin:
+        if str(content_data.founder_id) != current_user.id and not current_user.is_admin:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied"

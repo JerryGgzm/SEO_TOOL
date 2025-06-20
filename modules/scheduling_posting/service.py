@@ -98,7 +98,7 @@ class SchedulingPostingService:
                 content_item = {
                     'content_id': str(draft.id),
                     'content_type': draft.content_type,
-                    'content_text': draft.current_content or draft.generated_text,
+                    'content_text': draft.final_text,
                     'status': draft.status,
                     'quality_score': getattr(draft, 'quality_score', None),
                     'created_at': draft.created_at.isoformat(),
@@ -139,7 +139,7 @@ class SchedulingPostingService:
             
             # Validate content exists and belongs to user
             content_draft = self.data_flow_manager.get_content_draft_by_id(schedule_request.content_id)
-            if not content_draft or content_draft.founder_id != user_id:
+            if not content_draft or str(content_draft.founder_id) != str(user_id):
                 return ScheduleResponse(
                     success=False,
                     message="Content not found or access denied"
@@ -525,7 +525,7 @@ class SchedulingPostingService:
                     )
                     content_preview = ""
                     if content_draft:
-                        content_text = content_draft.current_content or content_draft.generated_text
+                        content_text = content_draft.final_text
                         content_preview = content_text[:100] + "..." if len(content_text) > 100 else content_text
                     
                     history_item = PublishingHistoryItem(
@@ -745,7 +745,7 @@ class SchedulingPostingService:
                 )
             
             # Prepare tweet content
-            tweet_text = publish_request.custom_message or content_draft.current_content or content_draft.generated_text
+            tweet_text = publish_request.custom_message or content_draft.final_text
             
             # Validate tweet length
             if len(tweet_text) > 280:

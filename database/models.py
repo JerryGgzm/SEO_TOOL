@@ -380,7 +380,84 @@ class PostAnalytic(Base):
         return (self.likes or 0) + (self.retweets or 0) + (self.replies or 0) + (self.quote_tweets or 0)
     
     def calculate_engagement_rate(self) -> float:
-        """Calculate engagement rate as percentage"""
-        if not self.impressions or self.impressions == 0:
+        """Calculate engagement rate based on impressions"""
+        if self.impressions == 0:
             return 0.0
         return (self.total_engagements / self.impressions) * 100
+
+# ====================
+# Scheduling and Publishing Models
+# ====================
+
+class ScheduledContent(Base):
+    """Scheduled content table - stores content scheduled for future publishing"""
+    __tablename__ = 'scheduled_content'
+    
+    id = Column(UUID(), primary_key=True, default=uuid.uuid4, nullable=False)
+    content_draft_id = Column(UUID(), ForeignKey('generated_content_drafts.id'), nullable=False, index=True)
+    founder_id = Column(UUID(), ForeignKey('founders.id'), nullable=False, index=True)
+    scheduled_time = Column(DateTime, nullable=False, index=True, comment="When to publish the content")
+    status = Column(String(20), nullable=False, default='scheduled', index=True,
+                   comment="scheduled, processing, posted, failed, cancelled")
+    priority = Column(Integer, default=5, comment="Publishing priority (1-10)")
+    
+    # Publishing details
+    posted_at = Column(DateTime, comment="Actual posting time")
+    posted_tweet_id = Column(String(50), index=True, comment="Twitter ID after posting")
+    platform = Column(String(20), default='twitter', comment="Publishing platform")
+    
+    # Error handling
+    retry_count = Column(Integer, default=0, comment="Current retry count")
+    max_retries = Column(Integer, default=3, comment="Maximum retry attempts")
+    error_message = Column(Text, comment="Error message if failed")
+    error_code = Column(String(50), comment="Error code if failed")
+    
+    # Metadata
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by = Column(UUID(), ForeignKey('founders.id'), nullable=False, comment="User who scheduled the content")
+    tags = Column(JSONType, default=list, comment="Content tags")
+    
+    # Relationships
+    founder = relationship("Founder", foreign_keys=[founder_id])
+    content_draft = relationship("GeneratedContentDraft", foreign_keys=[content_draft_id])
+    creator = relationship("Founder", foreign_keys=[created_by])
+    
+    # Indexes for common queries
+    __table_args__ = (
+        Index('idx_scheduled_content_due', 'scheduled_time', 'status'),
+        Index('idx_scheduled_content_founder_status', 'founder_id', 'status'),
+        Index('idx_scheduled_content_platform_status', 'platform', 'status'),
+    )
+    
+    def __repr__(self):
+        return f"<ScheduledContent(id={self.id}, scheduled_time={self.scheduled_time}, status={self.status})>"
+    
+    @property
+    def is_due(self) -> bool:
+        """Check if content is due for publishing"""
+        return self.scheduled_time <= datetime.utcnow()
+    
+    @property
+    def is_overdue(self) -> bool:
+        """Check if content is overdue"""
+        from datetime import timedelta
+        return self.scheduled_time < datetime.utcnow() - timedelta(minutes=5)
+    
+    @property
+    def should_retry(self) -> bool:
+        """Check if content should be retried"""
+        return (self.status == 'failed' and 
+                self.retry_count < self.max_retries)
+    
+    @property
+    def tags_list(self) -> List[str]:
+        """Get tags as a list"""
+        if self.tags:
+            return self.tags if isinstance(self.tags, list) else []
+        return []
+    
+    @tags_list.setter
+    def tags_list(self, values: List[str]):
+        """Set tags from a list"""
+        self.tags = values

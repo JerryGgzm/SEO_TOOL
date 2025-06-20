@@ -3,7 +3,7 @@
 from fastapi import HTTPException, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict, Any, Tuple
 import jwt
 from jwt.exceptions import InvalidTokenError
 import os
@@ -13,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from modules.user_profile import UserProfileService, UserProfileRepository
 from modules.twitter_api import TwitterAPIClient
 import logging
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -25,17 +26,75 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 security = HTTPBearer()
 
 # Database configuration
-DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./test.db')
+DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///./ideation_db.sqlite')
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# Token validation cache
+_token_validation_cache: Dict[str, Tuple[bool, datetime]] = {}
+TOKEN_VALIDATION_INTERVAL = timedelta(minutes=5)  # 5分钟内不重复验证
+
+def should_validate_twitter_token(user_id: str) -> bool:
+    """检查是否需要验证Twitter token"""
+    if user_id not in _token_validation_cache:
+        return True
+    
+    is_valid, last_validated = _token_validation_cache[user_id]
+    if datetime.utcnow() - last_validated > TOKEN_VALIDATION_INTERVAL:
+        return True
+    
+    return not is_valid  # 如果上次验证失败，需要重新验证
+
+def cache_token_validation(user_id: str, is_valid: bool):
+    """缓存令牌验证结果"""
+    _token_validation_cache[user_id] = (is_valid, datetime.utcnow())
+
+def clear_token_cache(user_id: str = None):
+    """清除令牌验证缓存"""
+    global _token_validation_cache
+    if user_id:
+        _token_validation_cache.pop(user_id, None)
+        logger.info(f"清除用户 {user_id} 的令牌验证缓存")
+    else:
+        _token_validation_cache.clear()
+        logger.info("清除所有令牌验证缓存")
+
+def cleanup_expired_token_cache():
+    """清理过期的token验证缓存"""
+    global _token_validation_cache
+    current_time = datetime.utcnow()
+    expired_users = []
+    
+    for user_id, (is_valid, last_validated) in _token_validation_cache.items():
+        if current_time - last_validated > TOKEN_VALIDATION_INTERVAL * 2:  # 超过2倍间隔时间
+            expired_users.append(user_id)
+    
+    for user_id in expired_users:
+        del _token_validation_cache[user_id]
+        
+    if expired_users:
+        logger.info(f"Cleaned up {len(expired_users)} expired token cache entries")
+
+def get_token_cache_status() -> Dict[str, Any]:
+    """获取令牌缓存状态"""
+    return {
+        "cache_size": len(_token_validation_cache),
+        "cached_users": list(_token_validation_cache.keys()),
+        "cache_data": {
+            user_id: {"is_valid": is_valid, "cached_at": cached_at.isoformat()}
+            for user_id, (is_valid, cached_at) in _token_validation_cache.items()
+        }
+    }
+
 class User(BaseModel):
-    """User model"""
+    """User model for authentication"""
     id: str
     username: str
     email: str
     is_active: bool = True
-    twitter_access_token: Optional[str] = None
+    is_admin: bool = False  # 管理员标志
+    access_token: Optional[str] = None
+    should_reauth: bool = False  # 标记是否需要重新授权Twitter
     
     class Config:
         from_attributes = True
@@ -83,6 +142,10 @@ def verify_token(token: str) -> TokenData:
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> User:
     """Get current authenticated user"""
     try:
+        # 定期清理过期缓存 (每10次请求清理一次)
+        if random.randint(1, 10) == 1:
+            cleanup_expired_token_cache()
+        
         token = credentials.credentials
         logger.info(f"收到认证token (first 50 chars): {token[:50]}...")
         logger.info(f"使用的SECRET_KEY (first 10 chars): {SECRET_KEY[:10]}...")
@@ -120,36 +183,87 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
                 )
                 
             # Get Twitter credentials if available
-            twitter_access_token = None
-            try:
-                twitter_creds = service.repository.get_twitter_credentials(user_id)
-                if twitter_creds and hasattr(twitter_creds, 'access_token'):
-                    twitter_access_token = twitter_creds.access_token
-                    
-                    # 验证Twitter令牌
-                    if twitter_access_token:
-                        try:
-                            twitter_client = TwitterAPIClient(
-                                client_id=os.getenv('TWITTER_CLIENT_ID'),
-                                client_secret=os.getenv('TWITTER_CLIENT_SECRET')
-                            )
-                            is_valid = twitter_client.auth.validate_user_token(twitter_access_token)
-                            if not is_valid:
-                                twitter_access_token = None
-                        except Exception as e:
-                            logger.error(f"验证Twitter令牌失败: {e}")
-                            twitter_access_token = None
-            except Exception as e:
-                logger.error(f"获取Twitter凭证失败: {e}")
-                twitter_access_token = None
+            access_token = None
+            should_reauth = False
             
-            logger.info(f"创建User对象 - id: {user_data.user_id}, username: {user_data.username}")
+            try:
+                logger.info(f"开始获取用户 {user_id} 的Twitter凭证...")
+                twitter_creds = service.repository.get_twitter_credentials(user_id)
+                
+                if not twitter_creds:
+                    logger.info(f"用户 {user_id} 没有Twitter凭证记录")
+                    access_token = None
+                    should_reauth = True  # 没有凭证，需要授权
+                elif not hasattr(twitter_creds, 'access_token') or not twitter_creds.access_token:
+                    logger.info(f"用户 {user_id} 的Twitter凭证中没有access_token")
+                    access_token = None
+                    should_reauth = True  # 没有token，需要授权
+                else:
+                    access_token = twitter_creds.access_token
+                    logger.info(f"用户 {user_id} 找到Twitter access_token，长度: {len(access_token)}")
+                    
+                    # 优化的Twitter令牌验证 - 使用缓存和时间间隔
+                    if access_token:
+                        # 检查令牌是否过期（数据库中的过期时间）
+                        if twitter_creds.is_expired():
+                            logger.info(f"用户 {user_id} 的Twitter令牌已过期，过期时间: {twitter_creds.expires_at}")
+                            access_token = None
+                            # 标记需要重新授权
+                            should_reauth = True
+                        elif should_validate_twitter_token(user_id):
+                            # 只在必要时进行API验证
+                            try:
+                                logger.info(f"执行用户 {user_id} 的Twitter令牌API验证 (缓存过期)")
+                                twitter_client = TwitterAPIClient(
+                                    client_id=os.getenv('TWITTER_CLIENT_ID'),
+                                    client_secret=os.getenv('TWITTER_CLIENT_SECRET')
+                                )
+                                is_valid = twitter_client.auth.validate_user_token(access_token)
+                                cache_token_validation(user_id, is_valid)
+                                
+                                if not is_valid:
+                                    logger.error(f"用户 {user_id} 的Twitter令牌验证失败")
+                                    access_token = None
+                                    # 标记需要重新授权
+                                    should_reauth = True
+                                else:
+                                    logger.info(f"用户 {user_id} 的Twitter令牌验证成功")
+                                    should_reauth = False
+                                    
+                            except Exception as e:
+                                logger.error(f"验证用户 {user_id} 的Twitter令牌时发生错误: {e}")
+                                cache_token_validation(user_id, False)
+                                access_token = None
+                                should_reauth = True
+                        else:
+                            # 使用缓存的验证结果
+                            cached_valid, cached_time = _token_validation_cache.get(user_id, (False, datetime.min))
+                            if not cached_valid:
+                                access_token = None
+                                should_reauth = True
+                                logger.info(f"用户 {user_id} 使用缓存的Twitter令牌验证结果: 无效 (缓存时间: {cached_time})")
+                            else:
+                                should_reauth = False
+                                logger.info(f"用户 {user_id} 使用缓存的Twitter令牌验证结果: 有效 (缓存时间: {cached_time})")
+                    else:
+                        should_reauth = False
+            except Exception as e:
+                logger.error(f"获取用户 {user_id} 的Twitter凭证失败: {e}")
+                access_token = None
+                should_reauth = True  # 获取凭证失败，需要重新授权
+            
+            # 简单的管理员判断逻辑 - 可以根据需要修改
+            is_admin = user_data.username == 'demo_user' or user_data.email.endswith('@admin.com')
+            
+            logger.info(f"创建User对象 - id: {user_data.user_id}, username: {user_data.username}, twitter access token: {access_token}")
             return User(
                 id=user_data.user_id,
                 username=user_data.username,
                 email=user_data.email,
                 is_active=user_data.is_active,
-                twitter_access_token=twitter_access_token
+                is_admin=is_admin,
+                access_token=access_token,
+                should_reauth=should_reauth
             )
         finally:
             db.close()
