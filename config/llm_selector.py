@@ -13,7 +13,7 @@ class LLMSelector:
     """LLM 提供商选择器"""
     
     def __init__(self):
-        self.supported_providers = ["gemini", "openai", "gpt"]
+        self.supported_providers = ["gemini", "openai"]
         self.default_provider = "gemini"
     
     def get_preferred_provider(self) -> str:
@@ -44,14 +44,6 @@ class LLMSelector:
                 'prompt_style': 'strict_json'
             },
             'openai': {
-                'api_key_env': 'OPENAI_API_KEY',
-                'model': 'gpt-4-turbo-preview',
-                'temperature': 0.7,
-                'max_tokens': 2000,
-                'response_format': 'clean_json',
-                'prompt_style': 'natural_json'
-            },
-            'gpt': {
                 'api_key_env': 'OPENAI_API_KEY',
                 'model': 'gpt-4-turbo-preview',
                 'temperature': 0.7,

@@ -507,36 +507,19 @@ Focus on actionable, specific recommendations.
             return self._fallback_seo_suggestions()
     
     async def _call_llm(self, prompt: str) -> str:
-        """Call LLM for analysis"""
+        """Call LLM for SEO enhancement"""
         try:
             if not self.llm_client:
-                logger.warning("No LLM client available")
+                logger.warning("No LLM client available for SEO enhancement")
                 return None
-            
+
             # Use provider-specific prompt formatting
             formatted_prompt = self.parser.get_optimization_prompt(prompt)
-            
-            # Handle different LLM client types
-            if hasattr(self.llm_client, 'generate_content_async'):
-                # Gemini client
-                response = await self.llm_client.generate_content_async(formatted_prompt)
-                content = response.text
-            elif hasattr(self.llm_client, 'chat'):
-                # OpenAI client
-                response = await self.llm_client.chat.completions.create(
-                    model="gpt-4-turbo-preview",
-                    messages=[
-                        {"role": "system", "content": "You are an expert SEO content optimizer. Provide optimized content that maintains the original message while improving SEO potential."},
-                        {"role": "user", "content": formatted_prompt}
-                    ],
-                    temperature=0.7,
-                    max_tokens=2000
-                )
-                content = response.choices[0].message.content
-            else:
-                logger.warning(f"Unsupported LLM client type: {type(self.llm_client)}")
-                return None
-            
+
+            # The custom LLMClient has a unified `chat` method.
+            messages = [{"role": "user", "content": formatted_prompt}]
+            content = await self.llm_client.chat(messages=messages)
+
             if content:
                 # Debug: Log the raw response
                 logger.debug(f"Raw {self.llm_provider} response: {content[:200]}...")
@@ -973,31 +956,14 @@ Make each variation distinctly different while maintaining the core message.
             if not self.llm_client:
                 logger.warning("No LLM client available")
                 return None
-            
+
             # Use provider-specific prompt formatting
             formatted_prompt = self.parser.get_optimization_prompt(prompt)
-            
-            # Handle different LLM client types
-            if hasattr(self.llm_client, 'generate_content_async'):
-                # Gemini client
-                response = await self.llm_client.generate_content_async(formatted_prompt)
-                content = response.text
-            elif hasattr(self.llm_client, 'chat'):
-                # OpenAI client
-                response = await self.llm_client.chat.completions.create(
-                    model="gpt-4-turbo-preview",
-                    messages=[
-                        {"role": "system", "content": "You are an expert SEO content optimizer. Provide optimized content that maintains the original message while improving SEO potential."},
-                        {"role": "user", "content": formatted_prompt}
-                    ],
-                    temperature=0.7,
-                    max_tokens=2000
-                )
-                content = response.choices[0].message.content
-            else:
-                logger.warning(f"Unsupported LLM client type: {type(self.llm_client)}")
-                return None
-            
+
+            # The custom LLMClient has a unified `chat` method.
+            messages = [{"role": "user", "content": formatted_prompt}]
+            content = await self.llm_client.chat(messages=messages)
+
             if content:
                 # Debug: Log the raw response
                 logger.debug(f"Raw {self.llm_provider} response: {content[:200]}...")

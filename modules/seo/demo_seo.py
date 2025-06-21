@@ -4,18 +4,29 @@ SEO Demo
 SEO 模块演示，支持 Gemini 和 OpenAI LLM 提供商
 """
 
-import asyncio
-import os
 import sys
+import os
+import asyncio
+import logging
+from dotenv import load_dotenv
 import json
 from datetime import datetime
-from dotenv import load_dotenv
+
+# Load environment variables from .env file at the very beginning
+load_dotenv()
 
 # Add project root to Python path
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+# This allows the script to be run directly, despite being a sub-module.
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 
-# Load environment variables
-load_dotenv()
+from config.llm_config import LLM_CONFIG
+from config.llm_selector import llm_selector
+from modules.llm.client import LLMClient
+from modules.seo.models import SEOContentType, SEOOptimizationRequest, SEOAnalysisContext
+from modules.seo.llm_intelligence import LLMSEOIntelligence
+from modules.seo.optimizer import EnhancedSEOOptimizer, SEOOptimizer
 
 def get_llm_client(provider: str = None):
     """Get LLM client for specified provider"""
@@ -51,20 +62,20 @@ def get_llm_client(provider: str = None):
             return None
     
     elif provider.lower() in ["openai", "gpt"]:
-        api_key = os.getenv('OPENAI_API_KEY')
-        if not api_key:
-            print("❌ OpenAI API key not found. Set OPENAI_API_KEY in your .env file")
-            return None
-        
-        try:
-            import openai
-            client = openai.AsyncOpenAI(api_key=api_key)
+    api_key = os.getenv('OPENAI_API_KEY')
+    if not api_key:
+        print("❌ OpenAI API key not found. Set OPENAI_API_KEY in your .env file")
+        return None
+    
+    try:
+        import openai
+        client = openai.AsyncOpenAI(api_key=api_key)
             print("✅ OpenAI LLM client initialized successfully")
-            return client
-        except ImportError:
-            print("❌ OpenAI package not installed. Install with: pip install openai")
-            return None
-        except Exception as e:
+        return client
+    except ImportError:
+        print("❌ OpenAI package not installed. Install with: pip install openai")
+        return None
+    except Exception as e:
             print(f"❌ Failed to initialize OpenAI LLM client: {e}")
             return None
     
@@ -124,7 +135,7 @@ async def demo_llm_seo_intelligence(llm_client, provider: str):
     test_content = "Working on new AI features for our productivity app"
     print(f"📝 Original Content: {test_content}")
     
-    # Test different optimization modes
+        # Test different optimization modes
     optimization_modes = [
         ("Comprehensive Optimization Mode", "comprehensive"),
         ("Intelligent Optimization Mode", "intelligent"), 
@@ -221,63 +232,155 @@ async def demo_enhanced_seo_optimizer(llm_client, provider: str):
                             print(f"  • {improvement}")
                 else:
                     print("❌ Optimization failed")
-                    
-            except Exception as e:
+
+        except Exception as e:
                 print(f"❌ {mode.title()} mode failed: {e}")
-                
+        
     except Exception as e:
         print(f"❌ Enhanced SEO optimizer demo failed: {e}")
 
+class SEODemo:
+    def __init__(self, llm_provider: str, llm_client, config):
+        self.llm_provider = llm_provider
+        self.llm_client = llm_client
+        self.config = config
+        self.llm_intelligence = LLMSEOIntelligence(
+            llm_client=self.llm_client,
+            llm_provider=self.llm_provider
+        )
+
+        # Demo tests
+        self.demo_tests = [
+            {
+                "name": "General Productivity Tweet",
+                "content": "Working on new AI features for our productivity app",
+                "context": {
+                    "content_type": SEOContentType.TWEET,
+                    "target_audience": "startups and entrepreneurs",
+                    "niche_keywords": ["AI", "productivity", "startup"],
+                    "product_categories": ["software", "AI tools"],
+                    "brand_voice": {"tone": "enthusiastic"},
+                }
+            },
+            {
+                "name": "Developer Tool Announcement",
+                "content": "Our new feature helps developers save time and boost productivity",
+                "context": {
+                    "content_type": SEOContentType.TWEET,
+                    "target_audience": "software developers",
+                    "niche_keywords": ["development", "productivity", "tools"],
+                    "product_categories": ["developer tools", "software"],
+                    "brand_voice": {"tone": "informative"},
+                }
+            }
+        ]
+
+    def print_header(self, title: str):
+        """Prints a formatted header"""
+        print(f"\n{title}")
+        print("=" * (len(title) + 2))
+
+    async def run_demo(self):
+        """Run the simplified SEO optimization demo"""
+        self.print_header(f"🎯 SEO Content & Hashtag Generation ({self.llm_provider.upper()})")
+
+        for test in self.demo_tests:
+            print(f"\n📝 Original Content: {test['content']}")
+
+            # Prepare context and request
+            context = SEOAnalysisContext(**test['context'])
+            request = SEOOptimizationRequest(
+                content=test['content'],
+                content_type=context.content_type,
+                target_keywords=context.niche_keywords
+            )
+
+            # Use the core LLM intelligence for optimization
+            try:
+                result = await self.llm_intelligence.enhance_content_with_llm(request, context)
+
+                if result and result.get('enhanced_content'):
+                    print(f"✨ Optimized Content: {result['enhanced_content']}")
+
+                    # Display hashtags from suggestions
+                    suggestions = result.get('seo_suggestions')
+                    if suggestions and suggestions.recommended_hashtags:
+                        print(f"🏷️  Generated Hashtags: {' '.join(['#' + tag for tag in suggestions.recommended_hashtags])}")
+
+                else:
+                    print("❌ Optimization failed to produce a result.")
+        
+    except Exception as e:
+                print(f"❌ An error occurred during optimization: {e}")
+
 async def main():
-    """Main demo function"""
+    """Main function to run the SEO demo"""
     print("🚀 LLM-Enhanced SEO Module Demo")
     print("=" * 60)
     
-    # Show available providers
-    available = []
-    if os.getenv('GEMINI_API_KEY'):
-        available.append('GEMINI')
-    if os.getenv('OPENAI_API_KEY'):
-        available.append('OPENAI')
-    
-    print(f"\n📋 Available LLM Providers: {', '.join(available)}")
-    
-    # Interactive provider selection (only once)
-    selected_provider = interactive_select_provider()
-    if not selected_provider:
-        print("❌ No LLM provider selected. Demo cancelled.")
-        return
-    
-    # Get LLM client
-    llm_client = get_llm_client(selected_provider)
+    # Provider selection
+    print("\n📋 Available LLM Providers: GEMINI, OPENAI")
+    llm_provider, llm_config, llm_client = select_llm_provider()
+
     if not llm_client:
-        print("❌ LLM client not available")
+        print("❌ Demo cancelled.")
         return
-    
+
     print("=" * 60)
-    
-    # Run core demos with the selected provider
-    await demo_llm_seo_intelligence(llm_client, selected_provider)
-    await demo_enhanced_seo_optimizer(llm_client, selected_provider)
+
+    # Initialize and run the demo
+    demo = SEODemo(
+        llm_provider=llm_provider,
+        llm_client=llm_client,
+        config=llm_config
+    )
+    await demo.run_demo()
     
     print("\n" + "=" * 60)
-    print("🎉 LLM-Enhanced SEO Demo Completed!")
-    
-    print("\n🔧 Quick Integration Guide:")
-    print("1. Replace your existing SEOOptimizer with EnhancedSEOOptimizer")
-    print("2. Pass your LLM client when initializing the services")
-    print("3. Configure optimization modes in your config")
-    
-    print("\n💡 Key Benefits:")
-    print("✅ Intelligent keyword integration that maintains natural flow")
-    print("✅ Context-aware hashtag optimization")
-    print("✅ Engagement-focused content enhancement")
-    print("✅ Multiple optimization strategies (traditional, hybrid, intelligent)")
-    print("✅ Backward compatibility with existing code")
-    
-    print(f"\n🤖 LLM Provider Used: {selected_provider.upper()}")
-    print("✅ Automatic provider detection and parsing")
-    print("✅ Single provider selection")
+    print("🎉 SEO Demo Completed!")
 
-if __name__ == "__main__":
-    asyncio.run(main()) 
+# --- Helper Functions ---
+
+def select_llm_provider():
+    """Interactively selects the LLM provider and returns the provider, config, and client."""
+    selected_provider_name = llm_selector.interactive_select_provider()
+    if not selected_provider_name:
+        return None, None, None
+
+    # Get config and client
+    try:
+        provider_key = selected_provider_name.lower()
+        llm_config = LLM_CONFIG.get(provider_key)
+        if not llm_config:
+            print(f"❌ Configuration for '{provider_key}' not found.")
+            return None, None, None
+
+        # Add the provider name to the config dict for consistent access
+        llm_config['provider'] = provider_key
+        
+        # Create an instance of the LLMClient class
+        llm_client = LLMClient(
+            provider=provider_key,
+            api_key=llm_config.get('api_key'),
+            model_name=llm_config.get('model_name')
+        )
+
+        print(f"🤖 Using LLM Provider: {provider_key.upper()}")
+        if provider_key == 'gemini':
+            # Note: The current LLMClient only has logic for 'openai'.
+            # This will effectively run in a mock mode for Gemini unless client.py is updated.
+            print("✅ Gemini LLM client initialized (Note: currently uses mock responses).")
+        elif provider_key == 'openai' or provider_key == 'gpt':
+            print("✅ OpenAI LLM client initialized successfully")
+        return provider_key, llm_config, llm_client
+    except Exception as e:
+        print(f"❌ Error initializing LLM client: {e}")
+        return None, None, None
+
+if __name__ == '__main__':
+    # Setup logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    # Silence the verbose http client logs from the openai library
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    
+    asyncio.run(main())
