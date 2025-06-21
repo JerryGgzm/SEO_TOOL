@@ -20,7 +20,7 @@ class TwitterAuth:
     def get_authorization_url(self, redirect_uri: str, scopes: list = None) -> Tuple[str, str, str]:
         """Generate OAuth 2.0 authorization URL with PKCE"""
         if scopes is None:
-            scopes = ['tweet.read', 'users.read', 'follows.read', 'follows.write']
+            scopes = ['tweet.read', 'tweet.write', 'users.read', 'follows.read', 'follows.write']
             
         # Generate PKCE parameters
         code_verifier = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode('utf-8').rstrip('=')
@@ -111,7 +111,7 @@ class TwitterAuth:
                 logger.error(f"Response content: {e.response.text}")
             return None
     
-    def revoke_token(self, token: str) -> bool:
+    def revoke_token(self, token: str, token_type_hint: str = 'access_token') -> bool:
         """Revoke access token or refresh token"""
         url = 'https://api.x.com/2/oauth2/revoke'
         
@@ -121,6 +121,7 @@ class TwitterAuth:
         
         data = {
             'token': token,
+            'token_type_hint': token_type_hint,
             'client_id': self.client_id
         }
         
@@ -151,10 +152,36 @@ class TwitterAuth:
         }
         
         try:
-            response = requests.get(url, headers=headers)
-            return response.status_code == 200
+            response = requests.get(url, headers=headers, timeout=10)
             
-        except requests.RequestException:
+            if response.status_code == 200:
+                logger.debug("Twitter token validation successful")
+                return True
+            elif response.status_code == 401:
+                logger.warning(f"Twitter token validation failed: Invalid or expired token (401)")
+                return False
+            elif response.status_code == 429:
+                logger.warning(f"Twitter token validation failed: Rate limit exceeded (429)")
+                # For rate limits, we'll assume the token is valid to avoid unnecessary re-auth
+                return True
+            elif response.status_code in [403, 404]:
+                logger.warning(f"Twitter token validation failed: Access denied or user not found ({response.status_code})")
+                return False
+            else:
+                logger.warning(f"Twitter token validation failed: Unexpected status code {response.status_code}")
+                logger.debug(f"Response content: {response.text[:200]}...")
+                return False
+                
+        except requests.Timeout:
+            logger.warning("Twitter token validation failed: Request timeout")
+            # On timeout, assume token is valid to avoid unnecessary re-auth
+            return True
+        except requests.ConnectionError:
+            logger.warning("Twitter token validation failed: Connection error")
+            # On connection error, assume token is valid to avoid unnecessary re-auth
+            return True
+        except requests.RequestException as e:
+            logger.error(f"Twitter token validation failed: Request exception - {e}")
             return False
     
     @staticmethod

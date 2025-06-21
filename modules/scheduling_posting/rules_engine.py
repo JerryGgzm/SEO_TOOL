@@ -24,7 +24,7 @@ class RuleSeverity(str, Enum):
 class RuleViolation:
     """Represents a rule violation"""
     def __init__(self, rule_name: str, severity: RuleSeverity, message: str, 
-                 blocking: bool = False, suggestion: Optional[str] = None):
+                 blocking: bool = False, suggestion: str = None):
         self.rule_name = rule_name
         self.severity = severity
         self.message = message
@@ -333,7 +333,7 @@ class InternalRulesEngine:
             if not content_draft:
                 return None
             
-            content_text = content_draft.current_content or content_draft.generated_text
+            content_text = content_draft.final_text
             
             # Check for similar content in the past week
             check_period = rule.conditions.get("check_period_days", 7)
@@ -379,33 +379,78 @@ class InternalRulesEngine:
     async def _get_user_preferences(self, user_id: str) -> SchedulingPreferences:
         """Get user scheduling preferences"""
         try:
-            # Try to get from database
-            prefs_data = self.data_flow_manager.get_user_scheduling_preferences(user_id)
+            # Get founder settings from data flow manager
+            settings = self.data_flow_manager.get_founder_settings(user_id)
             
-            if prefs_data:
+            if settings and 'scheduling_preferences' in settings:
+                prefs_data = settings['scheduling_preferences']
+                # Ensure founder_id is included
+                prefs_data['founder_id'] = user_id
                 return SchedulingPreferences(**prefs_data)
-            else:
-                # Return default preferences
-                return SchedulingPreferences(founder_id=user_id)
-                
+            
+            # Return default preferences
+            return SchedulingPreferences(
+                founder_id=user_id,
+                max_posts_per_day=5,
+                min_interval_minutes=60,
+                preferred_posting_times=["09:00", "13:00", "17:00"],
+                avoid_weekends=False,
+                quiet_hours_start="22:00",
+                quiet_hours_end="08:00",
+                default_timezone="UTC",
+                auto_schedule_enabled=False
+            )
         except Exception as e:
-            logger.warning(f"Failed to get scheduling preferences: {e}")
-            return SchedulingPreferences(founder_id=user_id)
+            logger.warning(f"Failed to get user preferences, using defaults: {e}")
+            return SchedulingPreferences(
+                founder_id=user_id,
+                max_posts_per_day=5,
+                min_interval_minutes=60,
+                preferred_posting_times=["09:00", "13:00", "17:00"],
+                avoid_weekends=False,
+                quiet_hours_start="22:00",
+                quiet_hours_end="08:00",
+                default_timezone="UTC",
+                auto_schedule_enabled=False
+            )
     
     async def _get_user_rules(self, user_id: str) -> List[SchedulingRule]:
-        """Get user-specific rules, falling back to defaults"""
+        """Get user-specific rules"""
         try:
-            # Try to get user-specific rules from database
-            user_rules = self.data_flow_manager.get_user_scheduling_rules(user_id)
+            # Get user-specific rules from data flow manager
+            user_rules_data = self.data_flow_manager.get_user_scheduling_rules(user_id)
             
-            if user_rules:
-                return [SchedulingRule(**rule) for rule in user_rules]
-            else:
-                # Return default rules
-                return self.default_rules
-                
+            # Convert to SchedulingRule objects
+            user_rules = []
+            for rule_data in user_rules_data:
+                try:
+                    # Convert the rule_type string to enum
+                    rule_type = rule_data.get('rule_type', 'frequency_limit')
+                    if hasattr(PublishingRule, rule_type.upper()):
+                        rule_type_enum = getattr(PublishingRule, rule_type.upper())
+                    else:
+                        rule_type_enum = PublishingRule.FREQUENCY_LIMIT
+                    
+                    rule = SchedulingRule(
+                        id=rule_data.get('id', f"rule_{len(user_rules)}"),
+                        name=rule_data.get('name', 'User Rule'),
+                        rule_type=rule_type_enum,
+                        enabled=rule_data.get('enabled', True),
+                        priority=rule_data.get('priority', 5),
+                        conditions=rule_data.get('conditions', {}),
+                        actions=rule_data.get('actions', {})
+                    )
+                    user_rules.append(rule)
+                except Exception as rule_error:
+                    logger.warning(f"Failed to parse user rule: {rule_error}")
+                    continue
+            
+            # Merge with default rules
+            all_rules = self.default_rules + user_rules
+            return all_rules
+            
         except Exception as e:
-            logger.warning(f"Failed to get user rules: {e}")
+            logger.warning(f"Failed to get user rules, using defaults: {e}")
             return self.default_rules
     
     async def _generate_optimal_times(self, user_id: str, preferences: SchedulingPreferences) -> List[datetime]:
@@ -459,14 +504,41 @@ class InternalRulesEngine:
             
             # Check next 48 hours
             for _ in range(48):
-                # Create a mock rule check for this time
-                temp_result = await self.validate_publishing_rules(
-                    user_id=user_id,
-                    proposed_time=check_time,
-                    preferences=preferences
-                )
+                # Check rules individually to avoid infinite recursion
+                can_publish = True
                 
-                if temp_result.can_publish:
+                # Check daily limit
+                daily_count = self.data_flow_manager.get_daily_post_count(user_id, check_time.date())
+                if daily_count >= preferences.max_posts_per_day:
+                    can_publish = False
+                
+                # Check minimum interval
+                if can_publish:
+                    last_post_time = self.data_flow_manager.get_last_post_time(user_id)
+                    if last_post_time:
+                        time_diff = (check_time - last_post_time).total_seconds() / 60
+                        if time_diff < preferences.min_interval_minutes:
+                            can_publish = False
+                
+                # Check quiet hours
+                if can_publish and preferences.quiet_hours_start and preferences.quiet_hours_end:
+                    publish_time = check_time.time()
+                    start_time = datetime.strptime(preferences.quiet_hours_start, "%H:%M").time()
+                    end_time = datetime.strptime(preferences.quiet_hours_end, "%H:%M").time()
+                    
+                    # Handle overnight quiet hours
+                    if start_time > end_time:
+                        if publish_time >= start_time or publish_time <= end_time:
+                            can_publish = False
+                    else:
+                        if start_time <= publish_time <= end_time:
+                            can_publish = False
+                
+                # Check weekend restriction
+                if can_publish and preferences.avoid_weekends and check_time.weekday() >= 5:
+                    can_publish = False
+                
+                if can_publish:
                     return check_time
                 
                 check_time += timedelta(hours=1)

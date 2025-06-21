@@ -239,51 +239,19 @@ async def get_twitter_status(
     current_user: User = Depends(get_current_user),
     data_flow_manager: DataFlowManager = Depends(get_data_flow_manager)
 ):
-    """获取Twitter连接状态"""
+    """获取Twitter连接状态 - 优化版本"""
     try:
-        # 从数据库获取Twitter凭证
+        # 使用service中的优化方法，避免重复API调用
         from modules.user_profile.repository import UserProfileRepository
         repository = UserProfileRepository(data_flow_manager.db_session)
         service = UserProfileService(repository, data_flow_manager)
-        credentials = service.repository.get_twitter_credentials(current_user.id)
         
-        if not credentials:
-            return JSONResponse(
-                status_code=status.HTTP_200_OK,
-                content={
-                    "connected": False,
-                    "has_valid_token": False,
-                    "message": "Twitter账户未连接"
-                }
-            )
-            
-        # 检查令牌是否过期
-        is_expired = credentials.is_expired()
+        # 使用优化的连接状态检查方法
+        status_info = service.get_twitter_connection_status(current_user.id)
         
-        # 如果令牌未过期，验证令牌有效性
-        if not is_expired:
-            try:
-                # 使用Twitter API验证令牌
-                twitter_client = TwitterAPIClient(
-                    client_id=os.getenv('TWITTER_CLIENT_ID'),
-                    client_secret=os.getenv('TWITTER_CLIENT_SECRET')
-                )
-                is_valid = twitter_client.auth.validate_user_token(credentials.access_token)
-            except Exception as e:
-                is_valid = False
-                logger.error(f"验证Twitter令牌失败: {e}")
-        else:
-            is_valid = False
-            
         return JSONResponse(
             status_code=status.HTTP_200_OK,
-            content={
-                "connected": True,
-                "has_valid_token": is_valid,
-                "twitter_username": credentials.twitter_username,
-                "expires_at": credentials.expires_at.isoformat() if credentials.expires_at else None,
-                "message": "Twitter账户已连接" if is_valid else "Twitter令牌已过期"
-            }
+            content=status_info
         )
         
     except Exception as e:
@@ -391,6 +359,31 @@ async def refresh_twitter_token(
             detail=f"刷新Twitter令牌失败: {str(e)}"
         )
 
+@router.get("/profile/twitter/cache-status")
+async def get_twitter_cache_status(
+    current_user: User = Depends(get_current_user)
+):
+    """获取Twitter token验证缓存状态 - 调试用"""
+    try:
+        from api.middleware import get_token_cache_status
+        cache_status = get_token_cache_status()
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "message": "Token缓存状态获取成功",
+                "user_id": current_user.id,
+                "cache_status": cache_status
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"获取缓存状态失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取缓存状态失败"
+        )
+
 @router.post("/profile/twitter/revoke")
 async def revoke_twitter_token(
     current_user: User = Depends(get_current_user),
@@ -413,7 +406,7 @@ async def revoke_twitter_token(
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content={
-                "message": "Twitter令牌已撤销"
+                "message": "Twitter令牌已撤销，缓存已清理"
             }
         )
         
@@ -422,4 +415,170 @@ async def revoke_twitter_token(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"撤销Twitter令牌失败: {str(e)}"
+        )
+
+@router.get("/profile/twitter/debug")
+async def debug_twitter_credentials(
+    current_user: User = Depends(get_current_user),
+    data_flow_manager: DataFlowManager = Depends(get_data_flow_manager)
+):
+    """调试Twitter凭证状态 - 详细信息"""
+    try:
+        from modules.user_profile.repository import UserProfileRepository
+        repository = UserProfileRepository(data_flow_manager.db_session)
+        
+        # 直接从数据库获取Twitter凭证
+        credentials = repository.get_twitter_credentials(current_user.id)
+        
+        debug_info = {
+            "user_id": current_user.id,
+            "username": current_user.username,
+            "middleware_access_token": current_user.access_token,
+            "database_credentials_found": credentials is not None
+        }
+        
+        if credentials:
+            debug_info.update({
+                "has_access_token": bool(credentials.access_token),
+                "access_token_length": len(credentials.access_token) if credentials.access_token else 0,
+                "access_token_preview": credentials.access_token[:20] + "..." if credentials.access_token else None,
+                "has_refresh_token": bool(credentials.refresh_token),
+                "token_type": credentials.token_type,
+                "expires_at": credentials.expires_at.isoformat() if credentials.expires_at else None,
+                "is_expired": credentials.is_expired(),
+                "created_at": credentials.created_at.isoformat() if credentials.created_at else None,
+                "updated_at": credentials.updated_at.isoformat() if credentials.updated_at else None,
+                "twitter_user_id": credentials.twitter_user_id,
+                "twitter_username": credentials.twitter_username,
+                "scope": credentials.scope
+            })
+        
+        # 检查缓存状态
+        try:
+            from api.middleware import get_token_cache_status
+            cache_status = get_token_cache_status()
+            debug_info["cache_status"] = cache_status
+        except Exception as e:
+            debug_info["cache_error"] = str(e)
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "message": "Twitter凭证调试信息",
+                "debug_info": debug_info
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"调试Twitter凭证失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"调试失败: {str(e)}"
+        )
+
+@router.get("/profile/twitter/diagnose-saving")
+async def diagnose_twitter_credentials_saving(
+    current_user: User = Depends(get_current_user),
+    data_flow_manager: DataFlowManager = Depends(get_data_flow_manager)
+):
+    """诊断Twitter凭证保存系统 - 深度检查"""
+    try:
+        from modules.user_profile.repository import UserProfileRepository
+        repository = UserProfileRepository(data_flow_manager.db_session)
+        service = UserProfileService(repository, data_flow_manager)
+        
+        # 运行诊断
+        diagnosis = service.diagnose_twitter_credentials_saving(current_user.id)
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "message": "Twitter凭证保存系统诊断完成",
+                "diagnosis": diagnosis
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Twitter凭证保存诊断失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"诊断失败: {str(e)}"
+        )
+
+@router.get("/profile/twitter/reauth-check")
+async def check_reauth_needed(
+    current_user: User = Depends(get_current_user),
+    data_flow_manager: DataFlowManager = Depends(get_data_flow_manager)
+):
+    """检查是否需要重新授权Twitter"""
+    try:
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "needs_reauth": current_user.should_reauth,
+                "has_access_token": bool(current_user.access_token),
+                "user_id": current_user.id,
+                "message": "需要重新授权Twitter账户" if current_user.should_reauth else "Twitter授权正常",
+                "access_token": current_user.access_token
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"检查重新授权状态失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="检查授权状态失败"
+        )
+
+@router.post("/profile/twitter/start-reauth")
+async def start_twitter_reauth(
+    current_user: User = Depends(get_current_user),
+    data_flow_manager: DataFlowManager = Depends(get_data_flow_manager)
+):
+    """开始Twitter重新授权流程"""
+    try:
+        # 如果用户不需要重新授权，返回当前状态
+        if not current_user.should_reauth and current_user.access_token:
+            return JSONResponse(
+                status_code=status.HTTP_200_OK,
+                content={
+                    "message": "用户已授权，无需重新授权",
+                    "needs_reauth": False
+                }
+            )
+        
+        # 清除现有的无效凭证
+        from modules.user_profile.repository import UserProfileRepository
+        repository = UserProfileRepository(data_flow_manager.db_session)
+        service = UserProfileService(repository, data_flow_manager)
+        
+        # 删除旧的凭证
+        repository.delete_twitter_credentials(current_user.id)
+        
+        # 清除令牌验证缓存
+        try:
+            from api.middleware import clear_token_cache
+            clear_token_cache(current_user.id)
+        except ImportError:
+            pass
+        
+        # 生成新的授权URL
+        auth_url, state = service.get_twitter_auth_url(current_user.id)
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "message": "重新授权流程已启动",
+                "auth_url": auth_url,
+                "state": state,
+                "needs_reauth": True,
+                "instructions": "请访问提供的URL完成Twitter重新授权"
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"启动重新授权失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"启动重新授权失败: {str(e)}"
         )

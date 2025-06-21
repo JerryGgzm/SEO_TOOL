@@ -11,6 +11,7 @@ import logging
 
 from database import get_data_flow_manager, DataFlowManager
 from modules.twitter_api import TwitterAPIClient
+from modules.user_profile.service import UserProfileService
 from api.middleware import get_twitter_client
 from api.middleware import get_user_service
 from api.middleware import get_current_user, User
@@ -30,7 +31,7 @@ router = APIRouter(prefix="/api/scheduling", tags=["scheduling-posting"])
 async def get_scheduling_service(
     data_flow_manager: DataFlowManager = Depends(get_data_flow_manager),
     twitter_client: TwitterAPIClient = Depends(get_twitter_client),
-    user_service: get_user_service = Depends(get_user_service),
+    user_service: UserProfileService = Depends(get_user_service),
     current_user: User = Depends(get_current_user)
 ) -> SchedulingPostingService:
     """Get scheduling posting service with dependencies"""
@@ -39,8 +40,7 @@ async def get_scheduling_service(
             data_flow_manager=data_flow_manager,
             twitter_client=twitter_client,
             user_profile_service=user_service,
-            rules_engine_client=None,  # Would be injected in real app
-            analytics_collector=None   # Would be injected in real app
+            analytics_collector=None   # Optional parameter
         )
     except Exception as e:
         logger.error(f"Failed to create scheduling service: {e}")
@@ -711,4 +711,80 @@ async def health_check():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Service health check failed"
+        )
+
+@router.get("/status/{scheduled_id}")
+async def get_scheduled_content_status(
+    scheduled_id: str = Path(..., description="Scheduled content ID"),
+    current_user: User = Depends(get_current_user),
+    service: SchedulingPostingService = Depends(get_scheduling_service)
+):
+    """
+    Get the status of scheduled content
+    
+    Returns current status, execution details, and any errors for scheduled content.
+    Used to monitor the progress of scheduled publishing tasks.
+    """
+    try:
+        # Get scheduled content from database
+        scheduled_content = service.data_flow_manager.get_scheduled_content_by_id(scheduled_id)
+        
+        if not scheduled_content:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Scheduled content not found"
+            )
+        
+        # Verify user access
+        if str(scheduled_content.founder_id) != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+        
+        # Get content draft information
+        content_draft = None
+        if scheduled_content.content_draft_id:
+            content_draft = service.data_flow_manager.get_content_draft_by_id(
+                scheduled_content.content_draft_id
+            )
+        
+        # Prepare response
+        response_data = {
+            "scheduled_id": scheduled_id,
+            "status": scheduled_content.status,
+            "scheduled_time": scheduled_content.scheduled_time.isoformat() if scheduled_content.scheduled_time else None,
+            "created_at": scheduled_content.created_at.isoformat() if scheduled_content.created_at else None,
+            "updated_at": scheduled_content.updated_at.isoformat() if scheduled_content.updated_at else None,
+            "retry_count": getattr(scheduled_content, 'retry_count', 0),
+            "posted_tweet_id": getattr(scheduled_content, 'posted_tweet_id', None),
+            "error_message": getattr(scheduled_content, 'error_message', None),
+            "priority": getattr(scheduled_content, 'priority', 'normal'),
+            "tags": getattr(scheduled_content, 'tags', [])
+        }
+        
+        # Add content information if available
+        if content_draft:
+            response_data["content_info"] = {
+                "content_id": str(content_draft.id),
+                "content_type": content_draft.content_type,
+                "content_preview": (content_draft.final_text)[:100] + "..." 
+                                 if content_draft.final_text else "No content",
+                "content_status": content_draft.status
+            }
+        
+        logger.info(f"Retrieved status for scheduled content {scheduled_id}")
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content=response_data
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get scheduled content status: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve scheduled content status"
         )

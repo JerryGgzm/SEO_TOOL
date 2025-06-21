@@ -31,20 +31,18 @@ async def get_twitter_client(
     try:
         client_id = os.getenv('TWITTER_CLIENT_ID')
         client_secret = os.getenv('TWITTER_CLIENT_SECRET')
-        
         if not client_id or not client_secret:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Twitter API credentials not configured"
             )
-        
         # 检查用户是否有Twitter访问令牌
-        if not hasattr(current_user, 'twitter_access_token') or not current_user.twitter_access_token:
+        if not hasattr(current_user, 'access_token') or not current_user.access_token:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User has not authorized Twitter access. Please complete Twitter OAuth flow first."
             )
-            
+        logger.info(f"Creating Twitter client for user: {current_user.id}")
         return TwitterAPIClient(
             client_id=client_id,
             client_secret=client_secret
@@ -53,7 +51,7 @@ async def get_twitter_client(
         logger.error(f"Failed to create Twitter client: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to initialize Twitter client"
+            detail=f"Failed to initialize Twitter client: {e}"
         )
 
 @router.post("/tweets")
@@ -65,7 +63,7 @@ async def create_tweet(
     """Create a new tweet"""
     try:
         result = twitter_client.create_tweet(
-            user_token=current_user.twitter_access_token,
+            user_token=current_user.access_token,
             text=tweet_request.text,
             in_reply_to_tweet_id=tweet_request.reply_to_tweet_id,
             media_ids=tweet_request.media_ids
