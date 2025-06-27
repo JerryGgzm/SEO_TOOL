@@ -14,11 +14,13 @@ import secrets
 import bcrypt
 import base64
 import logging
+from dotenv import load_dotenv
 
 from database.models import Base, TwitterCredential  # 导入统一的TwitterCredential模型
 from .models import UserProfileData, ProductInfoData, TwitterCredentials, UserRegistration, UserLogin
 
 logger = logging.getLogger(__name__)
+load_dotenv('.env')
 
 class UserProfileTable(Base):
     """User profile table"""
@@ -151,17 +153,18 @@ class UserProfileRepository:
             return False
     
     def save_twitter_credentials(self, user_id: str, credentials: Dict[str, Any]) -> bool:
-        """保存Twitter凭证"""
+        """保存Twitter凭证 - 修复查询不一致问题"""
         try:
             # 加密令牌
             encrypted_access_token = self._encrypt_token(credentials.get('access_token'))
             encrypted_refresh_token = self._encrypt_token(credentials.get('refresh_token'))
             
-            # 创建或更新记录 - 使用founder_id字段
+            # 修复：使用founder_id字段查询，保持一致性
             existing = self.db_session.query(self.model_class).filter_by(founder_id=user_id).first()
             if existing:
-                existing.access_token = encrypted_access_token  # 直接使用access_token字段
-                existing.refresh_token = encrypted_refresh_token  # 直接使用refresh_token字段
+                logger.info(f"更新用户 {user_id} 的现有Twitter凭证")
+                existing.access_token = encrypted_access_token
+                existing.refresh_token = encrypted_refresh_token
                 existing.token_type = credentials.get('token_type', 'Bearer')
                 existing.expires_at = credentials.get('expires_at')
                 existing.scope = credentials.get('scope')
@@ -169,10 +172,11 @@ class UserProfileRepository:
                 existing.twitter_username = credentials.get('twitter_username')
                 existing.updated_at = datetime.utcnow()
             else:
+                logger.info(f"为用户 {user_id} 创建新的Twitter凭证记录")
                 new_credentials = self.model_class(
-                    founder_id=user_id,  # 使用founder_id
-                    access_token=encrypted_access_token,  # 直接使用access_token字段
-                    refresh_token=encrypted_refresh_token,  # 直接使用refresh_token字段
+                    founder_id=user_id,
+                    access_token=encrypted_access_token,
+                    refresh_token=encrypted_refresh_token,
                     token_type=credentials.get('token_type', 'Bearer'),
                     expires_at=credentials.get('expires_at'),
                     scope=credentials.get('scope'),
@@ -182,6 +186,7 @@ class UserProfileRepository:
                 self.db_session.add(new_credentials)
             
             self.db_session.commit()
+            logger.info(f"成功保存用户 {user_id} 的Twitter凭证")
             return True
             
         except Exception as e:
@@ -190,16 +195,19 @@ class UserProfileRepository:
             return False
     
     def get_twitter_credentials(self, user_id: str) -> Optional[TwitterCredentials]:
-        """获取Twitter凭证"""
+        """获取Twitter凭证 - 修复查询不一致问题"""
         try:
+            # 修复：使用founder_id字段查询，保持一致性
             credentials = self.db_session.query(self.model_class).filter_by(founder_id=user_id).first()
             if not credentials:
+                logger.info(f"用户 {user_id} 没有找到Twitter凭证")
                 return None
             
             # 解密令牌
             access_token = self._decrypt_token(credentials.access_token)
             refresh_token = self._decrypt_token(credentials.refresh_token)
             
+            logger.info(f"成功获取用户 {user_id} 的Twitter凭证")
             return TwitterCredentials(
                 user_id=user_id,
                 access_token=access_token,

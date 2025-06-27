@@ -65,15 +65,26 @@ class GeminiTrendAnalyzer:
             context_str = f"\nUser background: {user_context}" if user_context else ""
             
             prompt = f"""
-Based on the following keywords: '{keywords_str}', please help me find the top 5 most trending related topics on the internet right now.{context_str}
+You are an expert market researcher. Your primary function is to identify highly trending and relevant topics for startup founders based on a set of keywords.
 
-Please note:
-1. I need the most current and hottest topics
-2. Topics should be closely related to the provided keywords
-3. Please prioritize searching for English content
-4. The returned topics should be valuable for entrepreneurs and product developers
+**Task:** Utilize the 'Google Search' tool to find the 5 most current and trending topics related to the provided keywords.
 
-Please use the available tools to search for the latest trending topics.
+**Keywords:** "{keywords_str}"
+
+**Context/Additional Notes:**
+{context_str}
+
+**Important Considerations for Search:**
+1.  **Recency is key:** Prioritize results that indicate very recent trends, news, or discussions (e.g., within the last 2-4 weeks, if possible).
+2.  **Strict relevance:** Ensure topics are directly and closely related to the provided keywords. Avoid tangential or broadly related content.
+3.  **Language:** Focus exclusively on English content.
+4.  **Entrepreneurial Value:** The identified topics should have clear potential value for entrepreneurs and product developers, offering insights into market opportunities, challenges, or emerging areas.
+
+**Instructions for Tool Usage:**
+When using the 'Google Search' tool, formulate precise and effective search queries based on the "Keywords" and "Important Considerations for Search" to maximize the relevance and trendiness of the results.
+
+**Output Format:**
+Once the search results are obtained, summarize the 5 most trending topics identified, clearly stating why each topic is trending and its potential relevance to startup founders.
 """
             
             logger.info(f"Sending prompt to Gemini: {prompt[:100]}...")
@@ -234,28 +245,52 @@ Please use the available tools to search for the latest trending topics.
         analysis_text = analysis_result["analysis"]
         
         try:
-            # Use Gemini to further process analysis results and extract structured information
+            # Use Gemini to generate marketing tweets based on search results
             summary_prompt = f"""
-Please extract the top {max_topics} most important trending topics from the following analysis results, and provide for each topic:
-1. Topic title
-2. Brief description
-3. Relevance score (1-10)
-4. Why this topic is important
+You are an expert marketing strategist and copywriter, deeply knowledgeable in leveraging Twitter for startup growth. Your objective is to analyze provided Google Search results related to a startup's keywords and extract actionable insights. For each key insight, you will then provide comprehensive guidance on how a startup founder can craft compelling marketing tweets and suggest relevant hashtags.
 
-Analysis results:
+Here are the Google Search results:
+
 {analysis_text}
 
-Please return in JSON format as follows:
-{{
-    "topics": [
-        {{
-            "title": "Topic title",
-            "description": "Brief description",
-            "relevance_score": score,
-            "importance": "Importance explanation"
-        }}
-    ]
-}}
+**Your process should involve the following steps for each relevant insight:**
+
+1.  **Identify a Key Insight:** From the search results, pinpoint a significant trend, piece of news, emerging opportunity, or challenge that a startup in this domain should address or leverage. Summarize this insight concisely.
+
+2.  **Explain the Marketing Opportunity/Challenge:** Briefly elaborate on *why* this insight is important for a startup's marketing on Twitter. What problem does it solve, what value does it offer, or what conversation does it enable?
+
+3.  **Tweet Crafting Instructions:** Provide specific, actionable instructions on how to craft a tweet based on this insight. Consider:
+    * **Core Message:** What is the primary takeaway the tweet should convey?
+    * **Tone:** Should it be informative, inspirational, problem-solving, witty, urgent, etc.?
+    * **Call to Action (Optional but encouraged):** What action should the audience take (e.g., "Learn more," "Join the discussion," "Try our solution," "Share your thoughts")?
+    * **Engagement Strategy:** How can the tweet encourage replies, retweets, or likes (e.g., asking a question, posing a challenge, sharing a unique perspective, providing a quick tip)?
+    * **Conciseness:** Remind the user to keep it under Twitter's character limits (aim for impactful brevity).
+
+4.  **Relevant Hashtag Suggestions:** Propose 3-5 highly relevant hashtags for each tweet. These should include a mix of:
+    * **Broad Industry Hashtags:** (e.g., #Startup, #Tech, #Innovation, #Marketing)
+    * **Niche-Specific Hashtags:** (e.g., #FinTech, #SaaS, #AIinMarketing, #SustainableSolutions)
+    * **Trending/Event-Based Hashtags (if applicable):** If the search results indicate a current trend or event, suggest how to leverage a relevant trending hashtag.
+    * **Branded Hashtags (if known or to suggest creating one):** If the startup has one, include it; otherwise, suggest the benefit of creating one (e.g., #YourStartupName, #YourProductLaunch).
+
+**Example Structure for each Insight:**
+
+---
+**Insight 1: [Summarize Key Insight]**
+
+**Marketing Opportunity/Challenge:** [Explain why this is relevant for a startup's Twitter marketing.]
+
+**Tweet Crafting Instructions:**
+* **Core Message:** [What to say]
+* **Tone:** [e.g., Authoritative, Exciting, Empathetic]
+* **Call to Action:** [e.g., "Read our guide," "Discover how," "Share your insights!"]
+* **Engagement Strategy:** [e.g., Ask a direct question, provide a counter-intuitive fact.]
+
+**Hashtag Suggestions:**
+#Hashtag1 #Hashtag2 #NicheSpecificTag #RelevantTrend #[YourStartupName]
+
+---
+
+Prioritize insights that directly relate to potential product value, market shifts, customer pain points, or unique selling propositions for a startup. Ensure the advice is practical and easy for a founder to implement.
 """
             
             summary_response = self.model.generate_content(summary_prompt)
