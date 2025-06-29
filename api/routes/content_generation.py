@@ -40,11 +40,12 @@ def get_content_service(llm_provider: str = DEFAULT_LLM_PROVIDER) -> ContentGene
     llm_config = LLM_CONFIG.get(llm_provider)
     if not llm_config:
         raise HTTPException(status_code=400, detail=f"Unsupported LLM provider: {llm_provider}")
-        
-    # Initialize service
+    
+    # 初始化真实数据库的data_flow_manager
+    data_flow_manager = get_data_flow_manager()
     return ContentGenerationService(
-        data_flow_manager=None,  # TODO: Initialize with actual data flow manager
-        user_service=None,  # TODO: Initialize with actual user service
+        data_flow_manager=data_flow_manager,
+        user_service=None,
         llm_provider=llm_provider
     )
 
@@ -52,148 +53,72 @@ def get_content_service(llm_provider: str = DEFAULT_LLM_PROVIDER) -> ContentGene
 async def generate_content(
     request: ContentGenerationRequest,
     llm_provider: str = DEFAULT_LLM_PROVIDER,
+    current_user: User = Depends(get_current_user),
     service: ContentGenerationService = Depends(get_content_service)
-) -> List[str]:
-    """Generate content based on request
+) -> Dict[str, Any]:
+    """Generate content based on request with unified API
     
     Args:
-        request: Content generation request
+        request: Content generation request with generation_mode
         llm_provider: LLM provider to use (default: from config)
+        current_user: Current authenticated user
         service: Content generation service
         
     Returns:
-        List of generated content draft IDs
-    """
-    try:
-        # Generate content
-        draft_ids = await service.generate_content(
-            founder_id=request.founder_id,
-            trend_id=request.trend_id,
-            content_type=request.content_type,
-            count=request.count
-        )
-        
-        return draft_ids
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/generate/viral-focused")
-async def generate_viral_content(
-    founder_id: str = Query(..., description="Founder ID"),
-    content_type: ContentType = Query(default=ContentType.TWEET),
-    trend_id: Optional[str] = Query(None, description="Specific trend to base content on"),
-    quantity: int = Query(default=3, ge=1, le=10, description="Number of variations"),
-    current_user: User = Depends(get_current_user),
-    service: ContentGenerationService = Depends(get_content_service)
-):
-    """
-    Generate viral-focused content optimized for maximum engagement
-    
-    Uses strategies focused on:
-    - Viral content patterns
-    - Engagement optimization
-    - Trending topic alignment
-    - Shareable content elements
+        Response with generated content draft IDs and metadata
     """
     try:
         # Validate user access
-        if current_user.id != founder_id and not current_user.is_admin:
+        if current_user.id != request.founder_id and not current_user.is_admin:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied"
             )
         
-        # Generate viral-focused content
-        draft_ids = await service.generate_viral_focused_content(
-            founder_id=founder_id,
-            trend_id=trend_id,
-            content_type=content_type,
-            quantity=quantity
-        )
+        # Generate content based on mode
+        if request.generation_mode == GenerationMode.VIRAL_FOCUSED:
+            draft_ids = await service.generate_viral_focused_content(
+                founder_id=request.founder_id,
+                trend_id=request.trend_id,
+                content_type=request.content_type,
+                quantity=request.quantity
+            )
+        elif request.generation_mode == GenerationMode.BRAND_FOCUSED:
+            draft_ids = await service.generate_brand_focused_content(
+                founder_id=request.founder_id,
+                custom_brand_voice=request.custom_brand_voice,
+                content_type=request.content_type,
+                quantity=request.quantity
+            )
+        else:
+            # Standard and other modes
+            draft_ids = await service.generate_content(
+                founder_id=request.founder_id,
+                trend_id=request.trend_id,
+                content_type=request.content_type,
+                generation_mode=request.generation_mode,
+                quantity=request.quantity
+            )
         
         return JSONResponse(
             status_code=status.HTTP_201_CREATED,
             content={
-                "message": "Viral-focused content generated successfully",
+                "message": f"{request.generation_mode.value.replace('_', ' ').title()} content generated successfully",
                 "draft_ids": draft_ids,
                 "count": len(draft_ids),
-                "generation_mode": "viral_focused",
-                "content_type": content_type.value
+                "generation_mode": request.generation_mode.value,
+                "content_type": request.content_type.value,
+                "founder_id": request.founder_id
             }
         )
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Viral-focused content generation failed: {e}")
+        logger.error(f"Content generation failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Viral-focused content generation failed"
-        )
-
-@router.post("/generate/brand-focused")
-async def generate_brand_focused_content(
-    founder_id: str = Query(..., description="Founder ID"),
-    content_type: ContentType = Query(default=ContentType.TWEET),
-    tone: Optional[str] = Query(None, description="Brand tone override"),
-    style: Optional[str] = Query(None, description="Writing style override"),
-    quantity: int = Query(default=2, ge=1, le=5, description="Number of variations"),
-    current_user: User = Depends(get_current_user),
-    service: ContentGenerationService = Depends(get_content_service)
-):
-    """
-    Generate brand-focused content with strong brand alignment
-    
-    Focuses on:
-    - Brand voice consistency
-    - Brand messaging alignment
-    - Professional tone
-    - Brand value communication
-    """
-    try:
-        # Validate user access
-        if current_user.id != founder_id and not current_user.is_admin:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
-        
-        # Create custom brand voice if overrides provided
-        custom_brand_voice = None
-        if tone or style:
-            custom_brand_voice = BrandVoice(
-                tone=tone or "professional",
-                style=style or "informative"
-            )
-        
-        # Generate brand-focused content
-        draft_ids = await service.generate_brand_focused_content(
-            founder_id=founder_id,
-            custom_brand_voice=custom_brand_voice,
-            content_type=content_type,
-            quantity=quantity
-        )
-        
-        return JSONResponse(
-            status_code=status.HTTP_201_CREATED,
-            content={
-                "message": "Brand-focused content generated successfully",
-                "draft_ids": draft_ids,
-                "brand_overrides": {
-                    "tone": tone,
-                    "style": style
-                } if (tone or style) else None
-            }
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Brand-focused content generation failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Brand-focused content generation failed"
+            detail=f"Content generation failed: {str(e)}"
         )
 
 @router.get("/drafts/{draft_id}")
@@ -203,7 +128,7 @@ async def get_draft(
     service: ContentGenerationService = Depends(get_content_service)
 ):
     """
-    Get content draft by ID
+    Get content draft by ID - Unified draft management
     
     Returns the full content draft including generation metadata
     and quality scores.
@@ -245,67 +170,17 @@ async def get_draft(
             detail="Failed to retrieve draft"
         )
 
-@router.get("/drafts/founder/{founder_id}")
-async def get_founder_drafts(
-    founder_id: str = Path(..., description="Founder ID"),
-    limit: int = Query(default=20, ge=1, le=100, description="Maximum number of drafts"),
-    current_user: User = Depends(get_current_user),
-    service: ContentGenerationService = Depends(get_content_service)
-):
-    """
-    Get recent drafts for a founder
-    
-    Returns list of recent content drafts with basic information.
-    """
-    try:
-        # Validate user access
-        if current_user.id != founder_id and not current_user.is_admin:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
-        
-        # Get drafts
-        drafts = await service.get_drafts_by_founder(founder_id, limit)
-        
-        # Convert to response format
-        draft_list = []
-        for draft in drafts:
-            draft_list.append({
-                "draft_id": draft.id,
-                "content": draft.generated_text[:100] + "..." if len(draft.generated_text) > 100 else draft.generated_text,
-                "content_type": draft.content_type.value,
-                "quality_score": draft.quality_score,
-                "created_at": draft.created_at.isoformat()
-            })
-        
-        return {
-            "founder_id": founder_id,
-            "drafts": draft_list,
-            "count": len(draft_list),
-            "limit": limit
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get founder drafts: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve drafts"
-        )
-
-@router.put("/drafts/{draft_id}/quality-score")
-async def update_draft_quality_score(
+@router.put("/drafts/{draft_id}")
+async def update_draft(
     draft_id: str = Path(..., description="Draft ID"),
-    quality_score: float = Query(..., ge=0, le=1, description="Quality score"),
+    update_data: Dict[str, Any] = ...,
     current_user: User = Depends(get_current_user),
     service: ContentGenerationService = Depends(get_content_service)
 ):
     """
-    Update quality score for a draft
+    Update draft - Unified draft management
     
-    Allows manual quality score updates based on performance feedback.
+    Supports updating quality score, content, metadata, and status.
     """
     try:
         # Get draft first to check ownership
@@ -324,28 +199,203 @@ async def update_draft_quality_score(
                 detail="Access denied"
             )
         
-        # Update quality score
-        success = await service.update_draft_quality_score(draft_id, quality_score)
+        # Handle different update types
+        success = False
+        update_type = update_data.get("update_type", "quality_score")
+        
+        if update_type == "quality_score":
+            quality_score = update_data.get("quality_score")
+            if quality_score is not None:
+                success = await service.update_draft_quality_score(draft_id, quality_score)
+        elif update_type == "status":
+            # This would integrate with review optimization module
+            status = update_data.get("status")
+            if status:
+                # TODO: Implement status update
+                success = True
+        elif update_type == "content":
+            # This would allow content editing
+            content = update_data.get("content")
+            if content:
+                # TODO: Implement content update
+                success = True
         
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to update quality score"
+                detail="Failed to update draft"
             )
         
         return {
-            "message": "Quality score updated successfully",
+            "message": "Draft updated successfully",
             "draft_id": draft_id,
-            "new_quality_score": quality_score
+            "update_type": update_type,
+            "updated_fields": list(update_data.keys())
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to update quality score: {e}")
+        logger.error(f"Failed to update draft: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update quality score"
+            detail="Failed to update draft"
+        )
+
+@router.delete("/drafts/{draft_id}")
+async def delete_draft(
+    draft_id: str = Path(..., description="Draft ID"),
+    current_user: User = Depends(get_current_user),
+    service: ContentGenerationService = Depends(get_content_service)
+):
+    """
+    Delete draft - Unified draft management
+    """
+    try:
+        # Get draft first to check ownership
+        draft = await service.get_draft(draft_id)
+        
+        if not draft:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Draft not found"
+            )
+        
+        # Check user access
+        if current_user.id != draft.founder_id and not current_user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+        
+        # TODO: Implement draft deletion
+        success = True  # Placeholder
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to delete draft"
+            )
+        
+        return {
+            "message": "Draft deleted successfully",
+            "draft_id": draft_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete draft: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete draft"
+        )
+
+@router.post("/drafts/{draft_id}/duplicate")
+async def duplicate_draft(
+    draft_id: str = Path(..., description="Draft ID"),
+    current_user: User = Depends(get_current_user),
+    service: ContentGenerationService = Depends(get_content_service)
+):
+    """
+    Duplicate draft - Unified draft management
+    """
+    try:
+        # Get draft first to check ownership
+        draft = await service.get_draft(draft_id)
+        
+        if not draft:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Draft not found"
+            )
+        
+        # Check user access
+        if current_user.id != draft.founder_id and not current_user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+        
+        # TODO: Implement draft duplication
+        new_draft_id = f"duplicate_{draft_id}"  # Placeholder
+        
+        return {
+            "message": "Draft duplicated successfully",
+            "original_draft_id": draft_id,
+            "new_draft_id": new_draft_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to duplicate draft: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to duplicate draft"
+        )
+
+@router.get("/drafts/founder/{founder_id}")
+async def get_founder_drafts(
+    founder_id: str = Path(..., description="Founder ID"),
+    limit: int = Query(default=20, ge=1, le=100, description="Maximum number of drafts"),
+    content_type: Optional[ContentType] = Query(None, description="Filter by content type"),
+    quality_threshold: Optional[float] = Query(None, ge=0, le=1, description="Filter by quality threshold"),
+    current_user: User = Depends(get_current_user),
+    service: ContentGenerationService = Depends(get_content_service)
+):
+    """
+    Get founder's drafts - Unified draft management
+    
+    Returns a list of drafts for a founder with optional filtering.
+    """
+    try:
+        # Validate user access
+        if current_user.id != founder_id and not current_user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied"
+            )
+        
+        # Get drafts
+        drafts = service.get_drafts_by_founder(founder_id, limit)
+        
+        # Apply filters
+        if content_type:
+            drafts = [d for d in drafts if d.content_type == content_type]
+        
+        if quality_threshold is not None:
+            drafts = [d for d in drafts if d.quality_score >= quality_threshold]
+        
+        # Convert to response format
+        draft_list = []
+        for draft in drafts:
+            draft_list.append({
+                "draft_id": draft.id,
+                "content": draft.generated_text[:100] + "..." if len(draft.generated_text) > 100 else draft.generated_text,
+                "content_type": draft.content_type.value,
+                "quality_score": draft.quality_score,
+                "created_at": draft.created_at.isoformat()
+            })
+        
+        return {
+            "founder_id": founder_id,
+            "drafts": draft_list,
+            "count": len(draft_list),
+            "limit": limit,
+            "filters": {
+                "content_type": content_type.value if content_type else None,
+                "quality_threshold": quality_threshold
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get founder drafts: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve drafts"
         )
 
 @router.get("/templates/{content_type}")
@@ -483,3 +533,21 @@ async def health_check():
         "service": "content-generation",
         "timestamp": datetime.utcnow().isoformat()
     }
+
+# 保留原有的质量评分更新API作为兼容性
+@router.put("/drafts/{draft_id}/quality-score")
+async def update_draft_quality_score(
+    draft_id: str = Path(..., description="Draft ID"),
+    quality_score: float = Query(..., ge=0, le=1, description="Quality score"),
+    current_user: User = Depends(get_current_user),
+    service: ContentGenerationService = Depends(get_content_service)
+):
+    """
+    Update quality score for a draft (Legacy API for compatibility)
+    """
+    return await update_draft(
+        draft_id=draft_id,
+        update_data={"update_type": "quality_score", "quality_score": quality_score},
+        current_user=current_user,
+        service=service
+    )

@@ -40,8 +40,12 @@ class ContentGenerator:
         
         try:
             drafts = []
+            max_attempts = request.quantity * 3  # Allow more attempts for viral content
+            attempts = 0
             
-            for i in range(request.quantity):
+            while len(drafts) < request.quantity and attempts < max_attempts:
+                attempts += 1
+                
                 # Build prompt
                 prompt = self._build_prompt(request, context)
                 
@@ -80,9 +84,15 @@ class ContentGenerator:
                     quality_score = self._basic_quality_assessment(cleaned_content, request.content_type)
                     quality_metadata = {"fallback_assessment": True}
                 
+                # For viral content, use a lower quality threshold on retries
+                effective_threshold = request.quality_threshold
+                if request.generation_mode == 'viral_focused' and attempts > request.quantity:
+                    # After first round, lower threshold for viral content
+                    effective_threshold = max(0.4, request.quality_threshold - 0.1)
+                
                 # Skip if below quality threshold
-                if quality_score < request.quality_threshold:
-                    self.logger.info(f"Draft {i+1} below quality threshold ({quality_score:.2f})")
+                if quality_score < effective_threshold:
+                    self.logger.info(f"Draft attempt {attempts} below quality threshold ({quality_score:.2f} < {effective_threshold})")
                     continue
                 
                 # Create final draft with all metadata
@@ -93,13 +103,18 @@ class ContentGenerator:
                     quality_score=quality_score,
                     generation_metadata={
                         'prompt_used': prompt[:200] + '...' if len(prompt) > 200 else prompt,
-                        'generation_attempt': i + 1,
+                        'generation_attempt': attempts,
                         'llm_provider': self.llm_adapter.__class__.__name__,
-                        'quality_assessment': quality_metadata
+                        'quality_assessment': quality_metadata,
+                        'effective_threshold': effective_threshold
                     }
                 )
                 
                 drafts.append(draft)
+                self.logger.info(f"Generated draft {len(drafts)}/{request.quantity} with quality {quality_score:.2f}")
+            
+            if len(drafts) < request.quantity:
+                self.logger.warning(f"Only generated {len(drafts)}/{request.quantity} drafts after {attempts} attempts")
             
             return drafts
             

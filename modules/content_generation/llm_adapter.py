@@ -246,12 +246,12 @@ class LocalLLMAdapter(LLMAdapter):
 class GeminiAdapter(LLMAdapter):
     """Google Gemini LLM adapter"""
     
-    def __init__(self, api_key: str, model_name: str = "gemini-pro"):
+    def __init__(self, api_key: str, model_name: str = "gemini-2.0-flash"):
         """Initialize Gemini adapter
         
         Args:
             api_key: Gemini API key
-            model_name: Model name (default: gemini-pro)
+            model_name: Model name (default: gemini-2.0-flash)
         """
         self.api_key = api_key
         self.model_name = model_name

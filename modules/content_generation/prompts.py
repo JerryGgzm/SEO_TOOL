@@ -151,7 +151,41 @@ Requirements:
 - Use authentic, conversational tone
 - Make audience feel heard
 
-Generate a tweet designed to maximize meaningful engagement."""
+Generate a tweet designed to maximize meaningful engagement.""",
+
+            "regeneration": """Regenerate content based on feedback and improvement suggestions.
+
+Original Content:
+{original_content}
+
+Feedback:
+{feedback}
+
+Target Improvements:
+{target_improvements}
+
+Elements to Keep:
+{keep_elements}
+
+Elements to Avoid:
+{avoid_elements}
+
+Brand Context:
+- Product: {product_name}
+- Voice: {brand_tone}
+- Style: {brand_style}
+- Audience: {target_audience}
+
+Requirements:
+- Maximum 280 characters
+- Address the specific feedback provided
+- Keep the elements specified to maintain
+- Avoid the elements specified to avoid
+- Maintain brand voice and style
+- Improve upon the original content
+- Make it more engaging and effective
+
+Generate an improved version of the content based on the feedback and requirements."""
         },
         
         ContentType.REPLY: {
@@ -295,6 +329,10 @@ class PromptEngine:
                                   request: ContentGenerationRequest) -> str:
         """Determine the best template based on context and request"""
         
+        # Check if this is a regeneration request
+        if context.feedback or context.original_content:
+            return "regeneration"
+        
         # Check generation mode first
         if request.generation_mode == GenerationMode.VIRAL_FOCUSED:
             if content_type == ContentType.TWEET:
@@ -388,7 +426,14 @@ class PromptEngine:
             # Request-specific information
             "founder_id": request.founder_id,
             "generation_mode": request.generation_mode.value,
-            "custom_instructions": request.custom_prompt or "No additional instructions"
+            "custom_instructions": request.custom_prompt or "No additional instructions",
+            
+            # Regeneration-specific fields
+            "feedback": context.feedback or "No specific feedback provided",
+            "target_improvements": ", ".join(context.target_improvements) if context.target_improvements else "general improvement",
+            "keep_elements": ", ".join(context.keep_elements) if context.keep_elements else "core message",
+            "avoid_elements": ", ".join(context.avoid_elements) if context.avoid_elements else "none specified",
+            "original_content": context.original_content or "No original content provided"
         }
         
         # Fill template

@@ -1790,6 +1790,127 @@ class DataFlowManager:
         """Create a new content draft - wrapper for store_generated_content_draft"""
         return self.store_generated_content_draft(draft_data)
     
+    def get_founder_by_id(self, founder_id: str) -> Optional[Any]:
+        """Get founder by ID"""
+        try:
+            from database.models import Founder
+            return self.db_session.query(Founder).filter(Founder.id == founder_id).first()
+        except Exception as e:
+            logger.error(f"Failed to get founder by ID: {e}")
+            return None
+    
+    def get_products_by_founder(self, founder_id: str) -> List[Any]:
+        """Get products by founder ID"""
+        try:
+            from database.models import Product
+            return self.db_session.query(Product).filter(Product.founder_id == founder_id).all()
+        except Exception as e:
+            logger.error(f"Failed to get products by founder: {e}")
+            return []
+    
+    def get_content_preferences(self, founder_id: str) -> Dict[str, Any]:
+        """Get content preferences for founder"""
+        try:
+            # For now, return default preferences
+            return {
+                'preferred_tone': 'professional',
+                'writing_style': 'informative',
+                'target_audience': 'professionals',
+                'content_frequency': 'daily',
+                'preferred_topics': ['technology', 'business', 'innovation']
+            }
+        except Exception as e:
+            logger.error(f"Failed to get content preferences: {e}")
+            return {}
+    
+    def get_successful_content_patterns(self, founder_id: str) -> List[Dict[str, Any]]:
+        """Get successful content patterns for founder"""
+        try:
+            # For now, return default patterns
+            return [
+                {
+                    'pattern_type': 'question_based',
+                    'performance_score': 0.8,
+                    'characteristics': ['includes question', 'personal touch']
+                },
+                {
+                    'pattern_type': 'how_to',
+                    'performance_score': 0.7,
+                    'characteristics': ['educational', 'step-by-step']
+                }
+            ]
+        except Exception as e:
+            logger.error(f"Failed to get successful patterns: {e}")
+            return []
+    
+    def get_recent_drafts(self, founder_id: str, limit: int = 10) -> List[Any]:
+        """Get recent drafts for founder"""
+        try:
+            return self.db_session.query(GeneratedContentDraft).filter(
+                GeneratedContentDraft.founder_id == founder_id
+            ).order_by(GeneratedContentDraft.created_at.desc()).limit(limit).all()
+        except Exception as e:
+            logger.error(f"Failed to get recent drafts: {e}")
+            return []
+    
+    def get_drafts_by_founder(self, founder_id: str, limit: int = 20) -> List[Any]:
+        """Get drafts by founder ID"""
+        try:
+            return self.db_session.query(GeneratedContentDraft).filter(
+                GeneratedContentDraft.founder_id == founder_id
+            ).order_by(GeneratedContentDraft.created_at.desc()).limit(limit).all()
+        except Exception as e:
+            logger.error(f"Failed to get drafts by founder: {e}")
+            return []
+    
+    def get_trend_by_id(self, trend_id: str) -> Optional[Any]:
+        """Get trend by ID"""
+        try:
+            # 处理UUID格式 - 支持字符串和UUID对象
+            import uuid
+            try:
+                # 如果已经是UUID对象，直接转换为字符串
+                if isinstance(trend_id, uuid.UUID):
+                    trend_id = str(trend_id)
+                else:
+                    # 如果是字符串，验证UUID格式
+                    uuid_obj = uuid.UUID(trend_id)
+                    trend_id = str(uuid_obj)
+            except (ValueError, TypeError) as e:
+                logger.error(f"Invalid UUID format: {trend_id}, error: {e}")
+                return None
+                
+            return self.db_session.query(AnalyzedTrend).filter(
+                AnalyzedTrend.id == trend_id
+            ).first()
+        except Exception as e:
+            logger.error(f"Failed to get trend by ID {trend_id}: {e}")
+            return None
+    
+    def update_draft_quality_score(self, draft_id: str, quality_score: float) -> bool:
+        """Update quality score for a draft"""
+        try:
+            draft = self.db_session.query(GeneratedContentDraft).filter(
+                GeneratedContentDraft.id == draft_id
+            ).first()
+            
+            if not draft:
+                logger.error(f"Content draft not found: {draft_id}")
+                return False
+            
+            # Update quality score
+            draft.quality_score = quality_score
+            draft.updated_at = datetime.now(UTC)
+            
+            self.db_session.commit()
+            logger.info(f"Quality score updated for draft: {draft_id}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to update quality score for draft {draft_id}: {e}")
+            self.db_session.rollback()
+            return False
+    
     async def get_twitter_auth_url(self, user_id: str) -> Tuple[str, str]:
         """获取Twitter授权URL - 重构版本，使用统一的UserProfileService"""
         try:
@@ -1846,105 +1967,6 @@ class DataFlowManager:
         # 实际上UserProfileService会管理状态和用户ID的关联
         return None
     
-    def get_user_scheduling_rules(self, user_id: str) -> List[Dict[str, Any]]:
-        """Get user-specific scheduling rules"""
-        try:
-            # 返回符合SchedulingRule模型的调度规则
-            return [
-                {
-                    "id": "daily_limit",
-                    "name": "Daily Posting Limit",
-                    "rule_type": "frequency_limit",
-                    "enabled": True,
-                    "priority": 5,
-                    "conditions": {
-                        "max_posts_per_day": 10,
-                        "time_window": "24h"
-                    },
-                    "actions": {
-                        "block_posting": True,
-                        "suggest_next_slot": True
-                    }
-                },
-                {
-                    "id": "minimum_interval",
-                    "name": "Minimum Interval",
-                    "rule_type": "content_spacing",
-                    "enabled": True,
-                    "priority": 4,
-                    "conditions": {
-                        "minimum_minutes": 30,
-                        "content_type": "all"
-                    },
-                    "actions": {
-                        "defer_posting": True,
-                        "calculate_next_slot": True
-                    }
-                }
-            ]
-        except Exception as e:
-            logger.error(f"Failed to get user scheduling rules: {e}")
-            return []
-
-    def get_daily_post_count(self, user_id: str, date: Optional[datetime] = None) -> int:
-        """Get daily post count for user"""
-        try:
-            if date is None:
-                date = datetime.utcnow().date()
-            
-            # 查询当天已发布的内容数量
-            start_of_day = datetime.combine(date, datetime.min.time())
-            end_of_day = datetime.combine(date, datetime.max.time())
-            
-            count = self.db_session.query(ScheduledContent).filter(
-                ScheduledContent.founder_id == user_id,
-                ScheduledContent.status == 'posted',
-                ScheduledContent.posted_at >= start_of_day,
-                ScheduledContent.posted_at <= end_of_day
-            ).count()
-            
-            return count
-        except Exception as e:
-            logger.error(f"Failed to get daily post count: {e}")
-            return 0
-
-    def get_last_post_time(self, user_id: str) -> Optional[datetime]:
-        """Get the time of the last post for user"""
-        try:
-            last_post = self.db_session.query(ScheduledContent).filter(
-                ScheduledContent.founder_id == user_id,
-                ScheduledContent.status == 'posted'
-            ).order_by(ScheduledContent.posted_at.desc()).first()
-            
-            return last_post.posted_at if last_post else None
-        except Exception as e:
-            logger.error(f"Failed to get last post time: {e}")
-            return None
-
-    def get_scheduled_posts_in_timeframe(self, user_id: str, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
-        """Get scheduled posts in a specific timeframe"""
-        try:
-            scheduled_posts = self.db_session.query(ScheduledContent).filter(
-                ScheduledContent.founder_id == user_id,
-                ScheduledContent.status.in_(['scheduled', 'processing']),
-                ScheduledContent.scheduled_time >= start_time,
-                ScheduledContent.scheduled_time <= end_time
-            ).all()
-            
-            return [
-                {
-                    "id": str(post.id),
-                    "scheduled_time": post.scheduled_time,
-                    "content_draft_id": str(post.content_draft_id),
-                    "status": post.status
-                }
-                for post in scheduled_posts
-            ]
-        except Exception as e:
-            logger.error(f"Failed to get scheduled posts in timeframe: {e}")
-            return []
-
-    # OAuth code verifier 清理功能已迁移到 UserProfileService
     def get_user_scheduling_rules(self, user_id: str) -> List[Dict[str, Any]]:
         """Get user-specific scheduling rules"""
         try:
@@ -2203,6 +2225,75 @@ class DataFlowManager:
             return True
         except Exception as e:
             logger.error(f"Failed to update user scheduling rule: {e}")
+            return False
+
+    def get_pending_content_drafts(self, founder_id: str, limit: int = 10, offset: int = 0) -> list:
+        """获取待审核草稿列表（状态为pending_review）"""
+        try:
+            return self.get_content_drafts_by_status(
+                founder_id,
+                status_list=["pending_review"],
+                limit=limit,
+                offset=offset
+            )
+        except Exception as e:
+            logger.error(f"Failed to get pending content drafts: {e}")
+            return []
+
+    def get_review_history(self, founder_id: str, status: str = None, limit: int = 20, offset: int = 0) -> list:
+        """获取审核历史（可选按状态过滤）"""
+        try:
+            status_list = [status] if status else ["approved", "rejected", "posted"]
+            return self.get_content_drafts_by_status(
+                founder_id,
+                status_list=status_list,
+                limit=limit,
+                offset=offset
+            )
+        except Exception as e:
+            logger.error(f"Failed to get review history: {e}")
+            return []
+
+    def update_content_draft_metadata(self, draft_id: str, metadata_update: dict) -> bool:
+        """
+        合并并更新草稿的ai_generation_metadata字段
+        """
+        try:
+            logger.info(f"[DEBUG] update_content_draft_metadata called with draft_id={draft_id}, metadata_update={metadata_update}")
+            
+            draft = self.get_content_draft_by_id(draft_id)
+            if not draft:
+                logger.error(f"[DEBUG] Draft not found: {draft_id}")
+                return False
+                
+            # 合并原有metadata
+            current_meta = getattr(draft, 'ai_generation_metadata', {}) or {}
+            logger.info(f"[DEBUG] Current metadata before update: {current_meta}")
+            
+            current_meta.update(metadata_update)
+            logger.info(f"[DEBUG] Metadata after update: {current_meta}")
+            
+            # 假设你有update_content_draft方法
+            update_data = {'ai_generation_metadata': current_meta}
+            logger.info(f"[DEBUG] Update data: {update_data}")
+            
+            result = self.update_content_draft(draft_id, update_data)
+            self.db_session.expire_all()  # 强制刷新session缓存，确保后续读取到最新数据
+            logger.info(f"[DEBUG] update_content_draft result: {result}")
+            
+            # 验证更新是否成功
+            if result:
+                updated_draft = self.get_content_draft_by_id(draft_id)
+                if updated_draft:
+                    final_meta = getattr(updated_draft, 'ai_generation_metadata', {}) or {}
+                    logger.info(f"[DEBUG] Final metadata after update: {final_meta}")
+                    regeneration_info = final_meta.get('regeneration_info', {})
+                    logger.info(f"[DEBUG] Final regeneration_info: {regeneration_info}")
+            
+            return result
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Failed to update content draft metadata: {e}")
             return False
 
 

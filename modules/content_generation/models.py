@@ -24,6 +24,7 @@ class BrandVoice(BaseModel):
     """Brand voice configuration"""
     tone: str = Field(default="professional", description="Content tone")
     style: str = Field(default="informative", description="Writing style")
+    personality: Optional[str] = Field(None, description="Brand personality")
     personality_traits: List[str] = Field(default=[], description="Brand personality")
     avoid_words: List[str] = Field(default=[], description="Words to avoid")
     preferred_phrases: List[str] = Field(default=[], description="Preferred expressions")
@@ -38,6 +39,12 @@ class ContentGenerationContext(BaseModel):
     successful_patterns: List[Dict[str, Any]] = Field(default=[], description="High-performing content patterns")
     target_audience: Optional[str] = Field(None, description="Target audience description")
     content_preferences: Dict[str, Any] = Field(default={}, description="Content generation preferences")
+    # New fields for regeneration support
+    feedback: Optional[str] = Field(None, description="Review feedback for regeneration")
+    target_improvements: List[str] = Field(default=[], description="Target improvements for regeneration")
+    keep_elements: List[str] = Field(default=[], description="Elements to keep from original content")
+    avoid_elements: List[str] = Field(default=[], description="Elements to avoid in new content")
+    original_content: Optional[str] = Field(None, description="Original content for reference")
 
 class ContentQualityScore(BaseModel):
     """Content quality assessment"""
@@ -51,14 +58,28 @@ class ContentQualityScore(BaseModel):
 
 class ContentDraft(BaseModel):
     """Generated content draft"""
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique draft ID")
     founder_id: str = Field(..., description="Founder ID")
     content_type: ContentType = Field(..., description="Type of content")
     generated_text: str = Field(..., description="Generated content text")
+    trend_id: Optional[str] = Field(None, description="Associated trend ID")
+    source_tweet_id: Optional[str] = Field(None, description="Source tweet ID for replies")
     quality_score: float = Field(default=0.0, ge=0, le=1, description="Quality assessment score")
     generation_metadata: Dict[str, Any] = Field(default={}, description="Generation metadata")
     created_at: datetime = Field(default_factory=datetime.now)
     
+    @field_validator('id')
+    @classmethod
+    def validate_id(cls, v: str) -> str:
+        """Validate UUID format"""
+        try:
+            # Ensure it's a valid UUID
+            uuid.UUID(v)
+            return v
+        except ValueError:
+            # Generate a new valid UUID if the current one is invalid
+            return str(uuid.uuid4())
+
     @field_validator('generated_text')
     @classmethod
     def validate_content_length(cls, v: str, info) -> str:
@@ -109,6 +130,7 @@ class ContentGenerationRequest(BaseModel):
     trend_id: Optional[str] = Field(None, description="Specific trend to base content on")
     source_tweet_id: Optional[str] = Field(None, description="Tweet to reply to")
     custom_prompt: Optional[str] = Field(None, description="Custom generation prompt")
+    custom_brand_voice: Optional[BrandVoice] = Field(None, description="Custom brand voice override")
     quantity: int = Field(default=1, ge=1, le=10, description="Number of variations to generate")
     quality_threshold: float = Field(default=0.6, ge=0, le=1, description="Minimum quality score")
 

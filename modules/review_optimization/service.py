@@ -9,6 +9,8 @@ from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta, timezone
 import logging
 import json
+import traceback
+import copy
 
 from database import DataFlowManager
 from modules.content_generation.service import ContentGenerationService
@@ -114,7 +116,7 @@ class ReviewOptimizationService:
             # Get draft from database
             db_draft = self.data_flow_manager.get_content_draft_by_id(draft_id)
             
-            if not db_draft or db_draft.founder_id != founder_id:
+            if not db_draft or str(db_draft.founder_id) != str(founder_id):
                 logger.warning(f"Draft {draft_id} not found or access denied for founder {founder_id}")
                 return None
             
@@ -148,7 +150,7 @@ class ReviewOptimizationService:
             
             # Get current draft
             db_draft = self.data_flow_manager.get_content_draft_by_id(draft_id)
-            if not db_draft or db_draft.founder_id != founder_id:
+            if not db_draft or str(db_draft.founder_id) != str(founder_id):
                 logger.error(f"Draft {draft_id} not found or access denied")
                 return False
             
@@ -248,16 +250,20 @@ class ReviewOptimizationService:
             history_items = []
             for db_item in db_history:
                 try:
+                    # 使用正确的字段名：generated_text 而不是 current_content
+                    content_text = db_item.edited_text if db_item.edited_text else db_item.generated_text
+                    content_preview = content_text[:100] + "..." if len(content_text) > 100 else content_text
+                    
                     # Convert to history item
                     history_item = ReviewHistoryItem(
                         draft_id=str(db_item.id),
-                        content_preview=db_item.current_content[:100] + "..." if len(db_item.current_content) > 100 else db_item.current_content,
+                        content_preview=content_preview,
                         status=DraftStatus(db_item.status),
-                        decision=ReviewDecision(db_item.review_decision) if db_item.review_decision else None,
-                        reviewed_at=db_item.reviewed_at or db_item.updated_at,
+                        decision=ReviewDecision(db_item.review_decision) if hasattr(db_item, 'review_decision') and db_item.review_decision else None,
+                        reviewed_at=getattr(db_item, 'reviewed_at', None) or db_item.created_at,
                         content_type=db_item.content_type,
-                        tags=db_item.tags or [],
-                        quality_score=db_item.quality_score
+                        tags=getattr(db_item, 'tags', []) or [],
+                        quality_score=getattr(db_item, 'quality_score', None)
                     )
                     history_items.append(history_item)
                 except Exception as e:
@@ -274,67 +280,61 @@ class ReviewOptimizationService:
                                regeneration_request: ContentRegenerationRequest) -> Optional[RegenerationResult]:
         """
         Regenerate content based on feedback
-        
-        Args:
-            draft_id: Original draft ID
-            founder_id: Founder ID
-            regeneration_request: Regeneration parameters
-            
-        Returns:
-            Regeneration result or None if failed
         """
         try:
-            logger.info(f"Regenerating content for draft {draft_id}")
-            
+            logger.info(f"[REGEN] Step 1: Start regenerate_content for draft {draft_id}")
             # Get original draft
             db_draft = self.data_flow_manager.get_content_draft_by_id(draft_id)
-            if not db_draft or db_draft.founder_id != founder_id:
+            logger.info(f"[REGEN] Step 2: Got db_draft: {db_draft}")
+            if not db_draft or str(db_draft.founder_id) != str(founder_id):
+                logger.warning(f"[REGEN] Step 2.1: db_draft not found or founder_id mismatch: {db_draft}, {founder_id}")
                 return None
-            
-            # Check regeneration attempts limit
-            regeneration_count = db_draft.generation_metadata.get('regeneration_count', 0)
+            # 兼容ai_generation_metadata字段
+            generation_metadata = getattr(db_draft, 'ai_generation_metadata', {}) or {}
+            regeneration_count = generation_metadata.get('regeneration_count', 0)
+            logger.info(f"[REGEN] Step 3: regeneration_count={regeneration_count}")
             if regeneration_count >= self.config['regeneration_attempts_limit']:
                 logger.warning(f"Regeneration limit reached for draft {draft_id}")
                 return None
-            
             # Prepare regeneration context
             regeneration_context = await self._prepare_regeneration_context(
                 db_draft, regeneration_request
             )
-            
+            logger.info(f"[REGEN] Step 4: Prepared regeneration_context: {regeneration_context}")
             # Generate new content
             if self.content_generation_service:
+                logger.info(f"[REGEN] Step 5: Calling _regenerate_with_content_service")
                 new_draft_ids = await self._regenerate_with_content_service(
                     db_draft, regeneration_context
                 )
-                
+                logger.info(f"[REGEN] Step 6: new_draft_ids: {new_draft_ids}")
                 if new_draft_ids:
                     new_draft_id = new_draft_ids[0]
                     new_db_draft = self.data_flow_manager.get_content_draft_by_id(new_draft_id)
-                    
+                    logger.info(f"[REGEN] Step 7: new_db_draft: {new_db_draft}")
                     if new_db_draft:
                         # Create regeneration result
                         result = RegenerationResult(
                             draft_id=draft_id,
-                            new_content=new_db_draft.generated_text,
+                            new_draft_id=new_draft_id,
+                            new_content=getattr(new_db_draft, 'generated_text', ''),
                             improvements_made=self._identify_improvements(
-                                db_draft.generated_text,
-                                new_db_draft.generated_text,
+                                getattr(db_draft, 'generated_text', ''),
+                                getattr(new_db_draft, 'generated_text', ''),
                                 regeneration_request
                             ),
-                            generation_metadata=new_db_draft.ai_generation_metadata or {},
+                            generation_metadata=getattr(new_db_draft, 'ai_generation_metadata', {}),
                             quality_score=getattr(new_db_draft, 'quality_score', None)
                         )
-                        
+                        logger.info(f"[REGEN] Step 8: RegenerationResult created: {result}")
                         # Update original draft with regeneration info
-                        await self._update_regeneration_metadata(draft_id, new_draft_id)
-                        
+                        await self._update_regeneration_metadata(draft_id, new_draft_id, result.improvements_made)
+                        logger.info(f"[REGEN] Step 9: Updated regeneration metadata")
                         return result
-            
+            logger.warning(f"[REGEN] Step 10: No new draft generated")
             return None
-            
         except Exception as e:
-            logger.error(f"Failed to regenerate content: {e}")
+            logger.error(f"Failed to regenerate content: {e}\n{traceback.format_exc()}")
             return None
     
     async def update_draft_status(self, draft_id: str, founder_id: str,
@@ -353,7 +353,7 @@ class ReviewOptimizationService:
         try:
             # Get current draft
             db_draft = self.data_flow_manager.get_content_draft_by_id(draft_id)
-            if not db_draft or db_draft.founder_id != founder_id:
+            if not db_draft or str(db_draft.founder_id) != str(founder_id):
                 return False
             
             # Validate status transition
@@ -389,6 +389,58 @@ class ReviewOptimizationService:
         except Exception as e:
             logger.error(f"Failed to update draft status: {e}")
             return False
+    
+    async def get_regeneration_result(self, draft_id: str, founder_id: str) -> Optional[RegenerationResult]:
+        """
+        Get the result of content regeneration
+        
+        Args:
+            draft_id: Original draft ID
+            founder_id: Founder ID
+            
+        Returns:
+            Regeneration result or None if not found
+        """
+        try:
+            # Get original draft
+            original_draft = self.data_flow_manager.get_content_draft_by_id(draft_id)
+            if not original_draft or str(original_draft.founder_id) != str(founder_id):
+                logger.warning(f"Original draft {draft_id} not found or access denied")
+                return None
+            
+            # Check if this draft has been regenerated
+            regeneration_info = getattr(original_draft, 'ai_generation_metadata', {}).get('regeneration_info', {})
+            if not regeneration_info:
+                logger.warning(f"No regeneration info found for draft {draft_id}")
+                return None
+            
+            # Get the new draft
+            new_draft_id = regeneration_info.get('new_draft_id')
+            if not new_draft_id:
+                logger.warning(f"No new draft ID found in regeneration info")
+                return None
+            
+            new_draft = self.data_flow_manager.get_content_draft_by_id(new_draft_id)
+            if not new_draft:
+                logger.warning(f"New draft {new_draft_id} not found")
+                return None
+            
+            # Create regeneration result
+            result = RegenerationResult(
+                draft_id=draft_id,
+                new_draft_id=new_draft_id,
+                new_content=getattr(new_draft, 'generated_text', ''),
+                improvements_made=regeneration_info.get('improvements_made', []),
+                generation_metadata=getattr(new_draft, 'ai_generation_metadata', {}),
+                quality_score=getattr(new_draft, 'quality_score', None),
+                regeneration_timestamp=datetime.fromisoformat(regeneration_info.get('regeneration_timestamp', datetime.utcnow().isoformat()))
+            )
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Failed to get regeneration result: {e}")
+            return None
     
     async def get_review_summary(self, founder_id: str, days: int = 30) -> ReviewSummary:
         """
@@ -684,34 +736,33 @@ class ReviewOptimizationService:
         try:
             if not self.content_generation_service:
                 return []
-            
             # Create regeneration request
             regeneration_request = ContentGenerationRequest(
-                founder_id=db_draft.founder_id,
+                founder_id=str(db_draft.founder_id),
                 content_type=ContentType(db_draft.content_type),
                 trend_id=db_draft.analyzed_trend_id,
                 custom_prompt=context.get('feedback'),
                 quantity=1,
-                quality_threshold=0.7
+                quality_threshold=0.0
             )
-            
             # Generate new content
+            logger.info(f"[REGEN] _regenerate_with_content_service: Calling regenerate_content_with_seo_feedback with draft_id={db_draft.id}")
             new_draft_ids = await self.content_generation_service.regenerate_content_with_seo_feedback(
                 str(db_draft.id),
-                db_draft.founder_id,
+                str(db_draft.founder_id),
                 context.get('feedback', ''),
                 {
                     'style_preferences': context.get('style_preferences', {}),
                     'target_improvements': context.get('target_improvements', []),
                     'keep_elements': context.get('keep_elements', []),
                     'avoid_elements': context.get('avoid_elements', [])
-                }
+                },
+                quality_threshold=0.0
             )
-            
+            logger.info(f"[REGEN] _regenerate_with_content_service: new_draft_ids={new_draft_ids}")
             return new_draft_ids if new_draft_ids else []
-            
         except Exception as e:
-            logger.error(f"Failed to regenerate with content service: {e}")
+            logger.error(f"Failed to regenerate with content service: {e}\n{traceback.format_exc()}")
             return []
     
     def _identify_improvements(self, original_content: str, new_content: str,
@@ -755,33 +806,66 @@ class ReviewOptimizationService:
             logger.warning(f"Failed to identify improvements: {e}")
             return ["Content regenerated based on feedback"]
     
-    async def _update_regeneration_metadata(self, original_draft_id: str, new_draft_id: str) -> None:
+    async def _update_regeneration_metadata(self, original_draft_id: str, new_draft_id: str, improvements_made: List[str] = None) -> None:
         """Update metadata for regeneration tracking"""
         try:
-            # Update original draft
-            original_metadata = {
+            logger.info(f"[DEBUG] _update_regeneration_metadata: original_draft_id={original_draft_id}, new_draft_id={new_draft_id}")
+            # 读取最新metadata
+            updated_draft = self.data_flow_manager.get_content_draft_by_id(original_draft_id)
+            current_meta = copy.deepcopy(getattr(updated_draft, 'ai_generation_metadata', {}) or {})
+            # 强制写入
+            current_meta['regeneration_info'] = {
                 'regenerated': True,
                 'regeneration_timestamp': datetime.utcnow().isoformat(),
-                'new_draft_id': new_draft_id
+                'new_draft_id': new_draft_id,
+                'improvements_made': improvements_made or []
             }
+            success = self.data_flow_manager.update_content_draft(original_draft_id, {'ai_generation_metadata': current_meta})
+            logger.info(f"[DEBUG] Forced update_content_draft result: {success}")
             
-            self.data_flow_manager.update_content_draft_metadata(
-                original_draft_id, {'regeneration_info': original_metadata}
-            )
+            if success:
+                # Verify the update
+                updated_draft = self.data_flow_manager.get_content_draft_by_id(original_draft_id)
+                if updated_draft:
+                    current_meta = getattr(updated_draft, 'ai_generation_metadata', {}) or {}
+                    logger.info(f"[DEBUG] Updated draft ai_generation_metadata: {current_meta}")
+                    regeneration_info = current_meta.get('regeneration_info', {})
+                    logger.info(f"[DEBUG] regeneration_info found: {regeneration_info}")
+                    
+                    # 如果 regeneration_info 仍然为空，尝试直接更新
+                    if not regeneration_info:
+                        logger.warning(f"[DEBUG] regeneration_info is empty, attempting direct update")
+                        # 直接使用 update_content_draft 方法
+                        direct_success = self.data_flow_manager.update_content_draft(
+                            original_draft_id, 
+                            {'ai_generation_metadata': current_meta}
+                        )
+                        logger.info(f"[DEBUG] Direct update result: {direct_success}")
+                else:
+                    logger.warning(f"[DEBUG] Could not retrieve updated draft {original_draft_id}")
+            else:
+                logger.error(f"[DEBUG] Failed to update content draft metadata for {original_draft_id}")
             
             # Update new draft
             new_metadata = {
                 'is_regeneration': True,
                 'original_draft_id': original_draft_id,
-                'regeneration_timestamp': datetime.utcnow().isoformat()
+                'regeneration_source': {
+                    'regeneration_timestamp': datetime.utcnow().isoformat(),
+                    'source_draft_id': original_draft_id
+                }
             }
             
-            self.data_flow_manager.update_content_draft_metadata(
+            logger.info(f"[DEBUG] New draft metadata to update: {new_metadata}")
+            
+            success2 = self.data_flow_manager.update_content_draft_metadata(
                 new_draft_id, {'regeneration_source': new_metadata}
             )
             
+            logger.info(f"[DEBUG] update_content_draft_metadata for new draft result: {success2}")
+            
         except Exception as e:
-            logger.warning(f"Failed to update regeneration metadata: {e}")
+            logger.error(f"Failed to update regeneration metadata: {e}\n{traceback.format_exc()}")
     
     def _is_valid_status_transition(self, current_status: str, new_status: DraftStatus) -> bool:
         """Validate status transitions"""
@@ -1171,7 +1255,7 @@ class ReviewOptimizationService:
         try:
             # Get draft with edit history
             db_draft = self.data_flow_manager.get_content_draft_by_id(draft_id)
-            if not db_draft or db_draft.founder_id != founder_id:
+            if not db_draft or str(db_draft.founder_id) != str(founder_id):
                 return None
             
             # Get latest edit

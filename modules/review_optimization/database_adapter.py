@@ -178,7 +178,7 @@ class ReviewOptimizationDatabaseAdapter:
                 founder_id=str(db_data.founder_id),
                 content_type=db_data.content_type,
                 original_content=db_data.generated_text or '',
-                current_content=getattr(db_data, 'current_content', db_data.generated_text) or '',
+                current_content=getattr(db_data, 'edited_text', db_data.generated_text) or '',
                 status=status,
                 priority=priority,
                 

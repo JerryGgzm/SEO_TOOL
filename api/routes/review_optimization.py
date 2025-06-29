@@ -16,9 +16,8 @@ from api.middleware import get_current_user, User
 from modules.review_optimization.service import ReviewOptimizationService
 from modules.review_optimization.models import (
     ContentDraftReview, ReviewDecisionRequest, BatchReviewRequest,
-    ContentRegenerationRequest, StatusUpdateRequest, ReviewHistoryItem,
-    ReviewSummary, ReviewAnalytics, RegenerationResult, ReviewQueue,
-    DraftStatus
+    ContentRegenerationRequest, ReviewHistoryItem,
+    RegenerationResult, DraftStatus
 )
 
 logger = logging.getLogger(__name__)
@@ -36,11 +35,10 @@ async def get_review_service(
         # Initialize content generation service (if available)
         content_generation_service = None
         try:
-            # This would be properly injected in a real application
+            # user_service参数可为None或mock
             content_generation_service = ContentGenerationService(
                 data_flow_manager=data_flow_manager,
-                seo_service=None,  # Would be injected
-                llm_config={'provider': 'openai'}  # Would come from config
+                user_service=None  # 可根据需要注入真实user_service
             )
         except Exception as e:
             logger.warning(f"Content generation service not available: {e}")
@@ -48,7 +46,7 @@ async def get_review_service(
         # Initialize analytics collector (if available)
         analytics_collector = None
         try:
-            analytics_collector = AnalyticsCollector()
+            analytics_collector = AnalyticsCollector(data_flow_manager)
         except Exception as e:
             logger.warning(f"Analytics collector not available: {e}")
         
@@ -101,38 +99,55 @@ async def get_pending_drafts(
             detail="Failed to retrieve pending drafts"
         )
 
-@router.get("/draft/{draft_id}", response_model=ContentDraftReview)
-async def get_draft_details(
-    draft_id: str = Path(..., description="Draft ID"),
+@router.post("/decision/batch")
+async def submit_batch_review_decisions(
+    batch_request: BatchReviewRequest = ...,
     current_user: User = Depends(get_current_user),
     service: ReviewOptimizationService = Depends(get_review_service)
 ):
     """
-    Get detailed information about a specific draft
+    Submit batch review decisions
     
-    Returns comprehensive information about the draft including
-    generation metadata, quality scores, and review history.
+    Processes multiple review decisions in a single request.
+    Useful for bulk operations like reviewing a week's worth of content.
     """
     try:
-        # Get draft details
-        draft = await service.get_draft_details(draft_id, current_user.id)
-        
-        if not draft:
+        # Validate batch size
+        if len(batch_request.decisions) == 0:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Draft not found or access denied"
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Batch request cannot be empty"
             )
         
-        logger.info(f"Retrieved draft details for {draft_id}")
-        return draft
+        if len(batch_request.decisions) > 50:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Batch size cannot exceed 50 decisions"
+            )
+        
+        # Process batch decisions
+        results = await service.submit_batch_review_decisions(
+            batch_request, current_user.id
+        )
+        
+        logger.info(f"Processed {len(results)} batch review decisions")
+        
+        return JSONResponse(
+            status_code=status.HTTP_200_OK,
+            content={
+                "message": "Batch review decisions processed",
+                "processed_count": len(results),
+                "results": results
+            }
+        )
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get draft details: {e}")
+        logger.error(f"Failed to submit batch review decisions: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve draft details"
+            detail="Failed to process batch review decisions"
         )
 
 @router.post("/decision/{draft_id}")
@@ -180,63 +195,6 @@ async def submit_review_decision(
             detail="Failed to process review decision"
         )
 
-@router.post("/decision/batch")
-async def submit_batch_review_decisions(
-    batch_request: BatchReviewRequest = ...,
-    current_user: User = Depends(get_current_user),
-    service: ReviewOptimizationService = Depends(get_review_service)
-):
-    """
-    Submit batch review decisions
-    
-    Processes multiple review decisions in a single request.
-    Useful for bulk operations like reviewing a week's worth of content.
-    """
-    try:
-        # Validate batch size
-        if len(batch_request.decisions) == 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Batch request cannot be empty"
-            )
-        
-        if len(batch_request.decisions) > 50:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Batch size cannot exceed 50 decisions"
-            )
-        
-        # Submit batch decisions
-        results = await service.submit_batch_review_decisions(
-            current_user.id, batch_request
-        )
-        
-        # Count successes and failures
-        successful_count = sum(1 for success in results.values() if success)
-        failed_count = len(results) - successful_count
-        
-        logger.info(f"Processed batch review: {successful_count} successful, {failed_count} failed")
-        
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content={
-                "message": "Batch review decisions processed",
-                "total_decisions": len(batch_request.decisions),
-                "successful_decisions": successful_count,
-                "failed_decisions": failed_count,
-                "results": results
-            }
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to submit batch review decisions: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to process batch review decisions"
-        )
-
 @router.get("/history", response_model=List[ReviewHistoryItem])
 async def get_review_history(
     user_id: str = Query(..., description="User ID"),
@@ -249,8 +207,8 @@ async def get_review_history(
     """
     Get review history for a user
     
-    Returns a paginated list of previously reviewed content
-    with filtering options by status.
+    Returns a list of review history items including decisions,
+    timestamps, and outcomes.
     """
     try:
         # Validate user access
@@ -258,13 +216,6 @@ async def get_review_history(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied"
-            )
-        
-        # Validate status filter
-        if status and status not in [s.value for s in DraftStatus]:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid status filter: {status}"
             )
         
         # Get review history
@@ -292,8 +243,8 @@ async def regenerate_content(
     """
     Regenerate content based on feedback
     
-    Creates new content based on the original draft and user feedback,
-    maintaining the context while addressing specific improvement areas.
+    Creates a new version of the content based on review feedback
+    and improvement suggestions.
     """
     try:
         # Regenerate content
@@ -304,7 +255,7 @@ async def regenerate_content(
         if not result:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to regenerate content. Check if draft exists and regeneration limit not exceeded."
+                detail="Failed to regenerate content"
             )
         
         logger.info(f"Regenerated content for draft {draft_id}")
@@ -328,51 +279,17 @@ async def get_regeneration_result(
     """
     Get the result of content regeneration
     
-    Retrieves the newly generated content and metadata
-    for a previously regenerated draft.
+    Returns the newly generated content and comparison with the original.
     """
     try:
-        # Get original draft to find regeneration info
-        original_draft = await service.get_draft_details(draft_id, current_user.id)
+        # Get regeneration result
+        result = await service.get_regeneration_result(draft_id, current_user.id)
         
-        if not original_draft:
+        if not result:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Original draft not found"
+                detail="Regeneration result not found"
             )
-        
-        # Check if draft was regenerated
-        regeneration_info = original_draft.generation_metadata.get('regeneration_info')
-        if not regeneration_info:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No regeneration found for this draft"
-            )
-        
-        # Get new draft
-        new_draft_id = regeneration_info.get('new_draft_id')
-        if not new_draft_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Regeneration result not available"
-            )
-        
-        new_draft = await service.get_draft_details(new_draft_id, current_user.id)
-        if not new_draft:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Regenerated draft not found"
-            )
-        
-        # Create regeneration result
-        result = RegenerationResult(
-            draft_id=draft_id,
-            new_content=new_draft.current_content,
-            improvements_made=regeneration_info.get('improvements_made', []),
-            generation_metadata=new_draft.generation_metadata,
-            quality_score=new_draft.quality_score,
-            seo_suggestions=new_draft.seo_suggestions
-        )
         
         logger.info(f"Retrieved regeneration result for draft {draft_id}")
         return result
@@ -384,55 +301,5 @@ async def get_regeneration_result(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve regeneration result"
-        )
-
-@router.put("/status/{draft_id}")
-async def update_draft_status(
-    draft_id: str = Path(..., description="Draft ID"),
-    status_request: StatusUpdateRequest = ...,
-    current_user: User = Depends(get_current_user),
-    service: ReviewOptimizationService = Depends(get_review_service)
-):
-    """
-    Update draft status
-    
-    Updates the status of a content draft and records
-    any associated metadata or notes.
-    """
-    try:
-        # Update draft status
-        success = await service.update_draft_status(
-            draft_id, current_user.id, status_request
-        )
-        
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to update draft status"
-            )
-        
-        logger.info(f"Updated status for draft {draft_id} to {status_request.status}")
-        
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content={
-                "success": True,
-                "data": {
-                    "draft_id": draft_id,
-                    "new_status": status_request.status.value,
-                    "updated_at": "2024-01-15T10:00:00Z"
-                },
-                "message": "草稿状态已更新",
-                "timestamp": "2024-01-15T10:00:00Z"
-            }
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to update draft status: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update draft status"
         )
         

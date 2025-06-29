@@ -173,6 +173,7 @@ class ReviewAnalytics(BaseModel):
 class RegenerationResult(BaseModel):
     """Result of content regeneration"""
     draft_id: str = Field(..., description="Original draft ID")
+    new_draft_id: Optional[str] = Field(None, description="Newly created draft ID")
     new_content: str = Field(..., description="Newly generated content")
     improvements_made: List[str] = Field(default=[], description="Improvements made")
     generation_metadata: Dict[str, Any] = Field(default={}, description="Generation metadata")
