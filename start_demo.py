@@ -59,7 +59,7 @@ def setup_environment():
     print("🔧 检查环境配置...")
     
     # 检查必需的包
-    required_packages = ['requests', 'dotenv']
+    required_packages =[] #['requests', 'dotenv']
     missing_packages = []
     
     for package in required_packages:

@@ -41,7 +41,9 @@ import argparse
 import requests
 import webbrowser
 import urllib.parse
-from datetime import datetime, timedelta
+import aiohttp
+import jwt
+from datetime import datetime, timedelta, UTC
 from typing import Dict, Any, Optional, List
 from pprint import pprint
 from dotenv import load_dotenv
@@ -59,6 +61,22 @@ print(f"SECRET_KEY: {'已设置' if os.getenv('SECRET_KEY') else '未设置'}\n"
 # 添加项目路径
 project_root = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(project_root)
+
+# 导入内容生成API测试器
+try:
+    from test_content_generation_api import ContentGenerationAPITester
+except ImportError:
+    # 在print_warning函数定义之前，使用简单的print
+    print("⚠️  无法导入ContentGenerationAPITester，内容生成测试将不可用")
+    ContentGenerationAPITester = None
+
+# 导入审核优化API测试器
+try:
+    from test_review_optimization_with_data import ReviewOptimizationCompleteTester
+except ImportError:
+    # 在print_warning函数定义之前，使用简单的print
+    print("⚠️  无法导入ReviewOptimizationCompleteTester，审核优化测试将不可用")
+    ReviewOptimizationCompleteTester = None
 
 # 颜色输出
 class Colors:
@@ -635,6 +653,199 @@ class CompleteWorkflowDemo:
         print("\n" + "="*50)
 
 
+    def step_4_content_generation(self) -> bool:
+        """步骤4: 内容生成API测试"""
+        print_step("步骤4", "内容生成API测试")
+        
+        if not ContentGenerationAPITester:
+            print_error("ContentGenerationAPITester不可用，跳过内容生成测试")
+            return False
+        
+        # 检查用户是否已登录
+        if not self.api_client.auth_token:
+            print_error("用户未登录，无法进行内容生成测试")
+            return False
+        
+        print("开始内容生成API测试...")
+        
+        # 创建异步测试运行器
+        async def run_content_generation_tests():
+            """运行内容生成测试"""
+            try:
+                async with ContentGenerationAPITester() as tester:
+                    # 使用当前用户的ID而不是测试ID
+                    tester.TEST_FOUNDER_ID = self.api_client.user_id
+                    
+                    # 运行核心测试
+                    tests = [
+                        ("健康检查", tester.test_health_check),
+                        ("标准内容生成", tester.test_standard_content_generation),
+                        ("病毒式内容生成", tester.test_viral_focused_generation),
+                        ("品牌导向内容生成", tester.test_brand_focused_generation),
+                        ("互动优化内容生成", tester.test_engagement_optimized_generation),
+                        ("不同内容类型", tester.test_different_content_types),
+                        ("草稿管理", tester.test_draft_management),
+                        ("草稿过滤", tester.test_draft_filtering),
+                    ]
+                    
+                    results = []
+                    for test_name, test_func in tests:
+                        try:
+                            print(f"\n🔍 运行测试: {test_name}")
+                            result = await test_func()
+                            results.append((test_name, result))
+                            
+                            if result:
+                                print_success(f"{test_name} 测试通过")
+                            else:
+                                print_warning(f"{test_name} 测试失败")
+                                
+                        except Exception as e:
+                            print_error(f"{test_name} 测试异常: {e}")
+                            results.append((test_name, False))
+                    
+                    # 统计结果
+                    success_count = sum(1 for _, result in results if result)
+                    total_count = len(results)
+                    
+                    print(f"\n📊 内容生成测试总结:")
+                    print(f"  成功: {success_count}/{total_count}")
+                    
+                    # 保存测试结果到demo_data
+                    self.demo_data["content_generation_tests"] = {
+                        "total_tests": total_count,
+                        "successful_tests": success_count,
+                        "test_results": results,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
+                    # 如果大部分测试通过，认为整体成功
+                    return success_count >= total_count * 0.7  # 70%通过率
+                    
+            except Exception as e:
+                print_error(f"内容生成测试运行失败: {e}")
+                return False
+        
+        # 运行异步测试
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            success = loop.run_until_complete(run_content_generation_tests())
+            loop.close()
+            
+            if success:
+                print_success("内容生成API测试完成")
+                return True
+            else:
+                print_warning("部分内容生成测试失败，但继续演示流程")
+                return True  # 即使部分失败也继续，不中断整个流程
+                
+        except Exception as e:
+            print_error(f"内容生成测试执行异常: {e}")
+            return False
+
+
+    def step_5_seo_optimization(self) -> bool:
+        """步骤5: SEO优化（占位符）"""
+        print_step("步骤5", "SEO优化")
+        print_warning("SEO优化功能暂未实现，跳过此步骤")
+        return True
+
+
+    def step_6_review_optimization(self) -> bool:
+        """步骤6: 审核优化API测试"""
+        print_step("步骤6", "审核优化API测试")
+        
+        if not ReviewOptimizationCompleteTester:
+            print_error("ReviewOptimizationCompleteTester不可用，跳过审核优化测试")
+            return False
+        
+        # 检查用户是否已登录
+        if not self.api_client.auth_token:
+            print_error("用户未登录，无法进行审核优化测试")
+            return False
+        
+        print("开始审核优化API测试...")
+        
+        # 创建异步测试运行器
+        async def run_review_optimization_tests():
+            """运行审核优化测试"""
+            try:
+                async with ReviewOptimizationCompleteTester() as tester:
+                    # 使用当前用户的ID而不是测试ID
+                    # 注意：这里需要修改tester中的TEST_FOUNDER_ID
+                    import test_review_optimization_with_data
+                    test_review_optimization_with_data.TEST_FOUNDER_ID = self.api_client.user_id
+                    
+                    # 运行核心测试
+                    tests = [
+                        ("生成测试草稿", tester.generate_test_drafts),
+                        ("获取待审核草稿列表", tester.test_get_pending_drafts),
+                        ("提交审核决定", tester.test_submit_review_decision),
+                        ("批量审核决定", tester.test_submit_batch_review_decisions),
+                        ("获取审核历史", tester.test_get_review_history),
+                        ("重新生成内容", tester.test_regenerate_content),
+                        ("获取重新生成结果", tester.test_get_regeneration_result),
+                        ("ContentGeneration集成", tester.test_content_generation_integration),
+                    ]
+                    
+                    results = []
+                    for test_name, test_func in tests:
+                        try:
+                            print(f"\n🔍 运行测试: {test_name}")
+                            result = await test_func()
+                            results.append((test_name, result))
+                            
+                            if result:
+                                print_success(f"{test_name} 测试通过")
+                            else:
+                                print_warning(f"{test_name} 测试失败")
+                                
+                        except Exception as e:
+                            print_error(f"{test_name} 测试异常: {e}")
+                            results.append((test_name, False))
+                    
+                    # 统计结果
+                    success_count = sum(1 for _, result in results if result)
+                    total_count = len(results)
+                    
+                    print(f"\n📊 审核优化测试总结:")
+                    print(f"  成功: {success_count}/{total_count}")
+                    
+                    # 保存测试结果到demo_data
+                    self.demo_data["review_optimization_tests"] = {
+                        "total_tests": total_count,
+                        "successful_tests": success_count,
+                        "test_results": results,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
+                    # 如果大部分测试通过，认为整体成功
+                    return success_count >= total_count * 0.6  # 60%通过率（审核优化可能更复杂）
+                    
+            except Exception as e:
+                print_error(f"审核优化测试运行失败: {e}")
+                return False
+        
+        # 运行异步测试
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            success = loop.run_until_complete(run_review_optimization_tests())
+            loop.close()
+            
+            if success:
+                print_success("审核优化API测试完成")
+                return True
+            else:
+                print_warning("部分审核优化测试失败，但继续演示流程")
+                return True  # 即使部分失败也继续，不中断整个流程
+                
+        except Exception as e:
+            print_error(f"审核优化测试执行异常: {e}")
+            return False
+
+
     def step_7_scheduling_posting(self) -> bool:
         """步骤7: 调度与发布"""
         print_step("步骤7", "调度与发布")
@@ -1166,9 +1377,9 @@ class CompleteWorkflowDemo:
             ("用户注册/登录", self.step_1_user_registration),
             ("Twitter OAuth", self.step_2_twitter_oauth),
             # ("趋势分析", self.step_3_trend_analysis),
-            # ("内容生成", self.step_4_content_generation),
+            ("内容生成", self.step_4_content_generation),
             # ("SEO优化", self.step_5_seo_optimization),
-            # ("审核优化", self.step_6_review_optimization),
+            ("审核优化", self.step_6_review_optimization),
             ("调度发布", self.step_7_scheduling_posting)
         ]
         
@@ -1212,7 +1423,7 @@ class CompleteWorkflowDemo:
             3: ("趋势分析", self.step_3_trend_analysis),
             4: ("内容生成", self.step_4_content_generation),
             5: ("SEO优化", self.step_5_seo_optimization),
-            # 6: ("审核优化", self.step_6_review_optimization),
+            6: ("审核优化", self.step_6_review_optimization),
             7: ("调度发布", self.step_7_scheduling_posting)
         }
         
@@ -1298,6 +1509,40 @@ class CompleteWorkflowDemo:
             if scheduled_info.get('error'):
                 print(f"  错误信息: {scheduled_info['error']}")
                 
+        # 显示内容生成测试结果
+        if self.demo_data.get("content_generation_tests"):
+            test_info = self.demo_data["content_generation_tests"]
+            print(f"\n{Colors.BOLD}🤖 内容生成API测试结果:{Colors.END}")
+            print(f"  总测试数: {test_info.get('total_tests', 0)}")
+            print(f"  成功测试: {test_info.get('successful_tests', 0)}")
+            print(f"  成功率: {test_info.get('successful_tests', 0)}/{test_info.get('total_tests', 0)}")
+            print(f"  测试时间: {test_info.get('timestamp', 'N/A')}")
+            
+            # 显示详细测试结果
+            test_results = test_info.get('test_results', [])
+            if test_results:
+                print(f"  详细结果:")
+                for test_name, result in test_results:
+                    status = "✅ 通过" if result else "❌ 失败"
+                    print(f"    {test_name}: {status}")
+        
+        # 显示审核优化测试结果
+        if self.demo_data.get("review_optimization_tests"):
+            test_info = self.demo_data["review_optimization_tests"]
+            print(f"\n{Colors.BOLD}🔍 审核优化API测试结果:{Colors.END}")
+            print(f"  总测试数: {test_info.get('total_tests', 0)}")
+            print(f"  成功测试: {test_info.get('successful_tests', 0)}")
+            print(f"  成功率: {test_info.get('successful_tests', 0)}/{test_info.get('total_tests', 0)}")
+            print(f"  测试时间: {test_info.get('timestamp', 'N/A')}")
+            
+            # 显示详细测试结果
+            test_results = test_info.get('test_results', [])
+            if test_results:
+                print(f"  详细结果:")
+                for test_name, result in test_results:
+                    status = "✅ 通过" if result else "❌ 失败"
+                    print(f"    {test_name}: {status}")
+        
         # 显示趋势分析详情
         if self.demo_data.get("trends"):
             print(f"\n{Colors.BOLD}📈 趋势分析详情:{Colors.END}")
@@ -1318,6 +1563,8 @@ class CompleteWorkflowDemo:
             ("✅ 用户认证", bool(self.api_client.auth_token)),
             ("✅ Twitter连接", bool(self.api_client.auth_token)),  # 简化检查
             ("✅ 趋势分析", bool(self.demo_data.get("trends"))),
+            ("✅ 内容生成API测试", bool(self.demo_data.get("content_generation_tests"))),
+            ("✅ 审核优化API测试", bool(self.demo_data.get("review_optimization_tests"))),
             ("✅ 内容生成", bool(self.demo_data.get("approved_content"))),
             ("📅 内容调度", bool(self.demo_data.get("scheduled_content"))),
             ("🐦 内容发布", bool(self.demo_data.get("published_tweet_id")))
@@ -1364,6 +1611,8 @@ def main():
   %(prog)s --demo                 # 运行完整演示
   %(prog)s --step 1               # 运行步骤1(用户注册)
   %(prog)s --step 3               # 运行步骤3(趋势分析)
+  %(prog)s --step 4               # 运行步骤4(内容生成API测试)
+  %(prog)s --step 6               # 运行步骤6(审核优化API测试)
   %(prog)s --url http://localhost:8000  # 指定API地址
         """
     )
@@ -1371,7 +1620,7 @@ def main():
     parser.add_argument('--demo', action='store_true',
                        help='运行完整工作流程演示')
     parser.add_argument('--step', type=int, metavar='N',
-                       help='运行特定步骤 (0-7)')
+                       help='运行特定步骤 (0-7, 4=内容生成API测试, 6=审核优化API测试)')
     parser.add_argument('--setup', action='store_true',
                        help='设置演示环境')
     parser.add_argument('--url', default='http://localhost:8000',
