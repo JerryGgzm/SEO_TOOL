@@ -104,58 +104,6 @@ class SEOOptimizationResult:
     suggestions: List[str] = field(default_factory=list)
     optimization_metadata: Dict[str, Any] = field(default_factory=dict)
 
-class CompetitorHashtagAnalysis(BaseModel):
-    """Competitor hashtag analysis"""
-    competitor_name: str = Field(..., description="Competitor identifier")
-    top_hashtags: List[str] = Field(..., description="Top performing hashtags")
-    hashtag_frequency: Dict[str, int] = Field(..., description="Hashtag usage frequency")
-    engagement_correlation: Dict[str, float] = Field(..., description="Hashtag-engagement correlation")
-    unique_hashtags: List[str] = Field(default=[], description="Unique hashtags not used by us")
-    gap_opportunities: List[str] = Field(default=[], description="Hashtag gap opportunities")
-
-class TrendingHashtagsData(BaseModel):
-    """Current trending hashtags data"""
-    global_trending: List[HashtagMetrics] = Field(default=[], description="Globally trending hashtags")
-    niche_trending: List[HashtagMetrics] = Field(default=[], description="Niche-specific trending")
-    location_trending: List[HashtagMetrics] = Field(default=[], description="Location-based trending")
-    industry_trending: List[HashtagMetrics] = Field(default=[], description="Industry-specific trending")
-    emerging_hashtags: List[HashtagMetrics] = Field(default=[], description="Emerging hashtags")
-    data_timestamp: datetime = Field(default_factory=datetime.utcnow, description="Data collection time")
-
-class SEOPerformanceMetrics(BaseModel):
-    """SEO performance tracking metrics"""
-    content_id: str = Field(..., description="Content identifier")
-    pre_optimization_metrics: Dict[str, float] = Field(..., description="Metrics before optimization")
-    post_optimization_metrics: Dict[str, float] = Field(..., description="Metrics after optimization")
-    improvement_percentage: float = Field(..., description="Percentage improvement")
-    hashtag_performance: Dict[str, float] = Field(default={}, description="Individual hashtag performance")
-    keyword_performance: Dict[str, float] = Field(default={}, description="Keyword performance tracking")
-    reach_metrics: Dict[str, int] = Field(default={}, description="Reach-related metrics")
-    engagement_metrics: Dict[str, float] = Field(default={}, description="Engagement metrics")
-    tracking_period_days: int = Field(default=7, description="Tracking period in days")
-
-class SEOConfiguration(BaseModel):
-    """SEO module configuration"""
-    default_optimization_level: SEOOptimizationLevel = Field(default=SEOOptimizationLevel.MODERATE)
-    default_hashtag_strategy: HashtagStrategy = Field(default=HashtagStrategy.ENGAGEMENT_OPTIMIZED)
-    max_hashtags_per_tweet: int = Field(default=5, ge=1, le=30)
-    max_hashtags_per_thread: int = Field(default=3, ge=1, le=15)
-    max_hashtags_per_reply: int = Field(default=2, ge=1, le=10)
-    keyword_analysis_enabled: bool = Field(default=True)
-    competitor_analysis_enabled: bool = Field(default=True)
-    trending_analysis_enabled: bool = Field(default=True)
-    auto_optimization_threshold: float = Field(default=0.7, ge=0, le=1)
-    performance_tracking_enabled: bool = Field(default=True)
-    cache_duration_hours: int = Field(default=6, ge=1, le=72)
-    api_rate_limit_per_hour: int = Field(default=1000, ge=100)
-    
-    @field_validator('max_hashtags_per_tweet', 'max_hashtags_per_thread', 'max_hashtags_per_reply')
-    @classmethod
-    def validate_hashtag_limits(cls, v):
-        if v <= 0:
-            raise ValueError('Hashtag limits must be positive')
-        return v
-
 class HashtagGenerationRequest(BaseModel):
     """Request for hashtag generation"""
     content: str = Field(..., description="Content to generate hashtags for")
@@ -167,15 +115,6 @@ class HashtagGenerationRequest(BaseModel):
     include_niche: bool = Field(default=True, description="Include niche-specific hashtags")
     exclude_hashtags: List[str] = Field(default=[], description="Hashtags to exclude")
     target_audience: Optional[str] = Field(None, description="Target audience")
-
-class KeywordOptimizationRequest(BaseModel):
-    """Request for keyword optimization"""
-    content: str = Field(..., description="Content to optimize")
-    target_keywords: List[str] = Field(default=[], description="Target keywords")
-    semantic_enhancement: bool = Field(default=True, description="Include semantic variations")
-    keyword_density_target: float = Field(default=0.02, ge=0, le=0.1, description="Target keyword density")
-    preserve_readability: bool = Field(default=True, description="Maintain content readability")
-    content_type: SEOContentType = Field(..., description="Content type")
 
 class ContentSuggestions(BaseModel):
     """Content suggestions for SEO optimization"""

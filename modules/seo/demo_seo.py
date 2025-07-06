@@ -136,8 +136,8 @@ class SEODemo:
 
                 else:
                     print("❌ Optimization failed to produce a result.")
-
-            except Exception as e:
+        
+    except Exception as e:
                 print(f"❌ An error occurred during optimization: {e}")
 
 
@@ -145,7 +145,7 @@ async def main():
     """Main function to run the SEO demo"""
     print("🚀 LLM-Enhanced SEO Module Demo")
     print("=" * 60)
-
+    
     # Provider selection
     llm_provider, llm_config, llm_client = select_llm_provider()
 
@@ -162,7 +162,7 @@ async def main():
         config=llm_config
     )
     await demo.run_demo()
-
+    
     print("\n" + "=" * 60)
     print("🎉 SEO Demo Completed!")
 

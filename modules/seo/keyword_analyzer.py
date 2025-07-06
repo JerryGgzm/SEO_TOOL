@@ -1,4 +1,3 @@
-
 """Keyword analysis and optimization engine"""
 import re
 import math
@@ -8,7 +7,7 @@ import logging
 
 from .models import (
     KeywordAnalysis, KeywordDifficulty, SEOContentType,
-    KeywordOptimizationRequest, SEOAnalysisContext
+    SEOAnalysisContext
 )
 
 logger = logging.getLogger(__name__)
@@ -478,50 +477,6 @@ class KeywordAnalyzer:
         ])
         
         return suggestions[:5]  # Limit to 5 suggestions
-    
-    def optimize_keyword_density(self, content: str, target_keywords: List[str],
-                                target_density: float = 0.02) -> str:
-        """Optimize keyword density in content"""
-        try:
-            words = content.split()
-            total_words = len(words)
-            
-            optimized_content = content
-            
-            for keyword in target_keywords:
-                current_count = content.lower().count(keyword.lower())
-                current_density = current_count / total_words if total_words > 0 else 0
-                
-                target_count = int(total_words * target_density)
-                
-                if current_density < target_density:
-                    # Need to add keyword
-                    additions_needed = target_count - current_count
-                    
-                    # Find natural places to insert keyword
-                    sentences = content.split('.')
-                    for i, sentence in enumerate(sentences):
-                        if additions_needed > 0 and len(sentence.strip()) > 20:
-                            # Try to insert keyword naturally
-                            if keyword.lower() not in sentence.lower():
-                                # Insert at the beginning of sentence
-                                sentences[i] = f" {keyword} " + sentence
-                                additions_needed -= 1
-                    
-                    optimized_content = '.'.join(sentences)
-                
-                elif current_density > target_density * 2:  # Too high density
-                    # Remove some instances
-                    removals_needed = current_count - target_count
-                    
-                    # Remove from less important positions
-                    optimized_content = optimized_content.replace(f" {keyword} ", " ", removals_needed)
-            
-            return optimized_content.strip()
-            
-        except Exception as e:
-            logger.error(f"Keyword density optimization failed: {e}")
-            return content
     
     def generate_keyword_suggestions(self, context: SEOAnalysisContext,
                                    suggestion_count: int = 20) -> List[str]:
