@@ -86,7 +86,7 @@ CREATE INDEX idx_analyzed_trends_founder_micro ON analyzed_trends(founder_id, is
 CREATE INDEX idx_analyzed_trends_analyzed_at ON analyzed_trends(analyzed_at);
 CREATE INDEX idx_analyzed_trends_potential_score ON analyzed_trends(trend_potential_score);
 
--- Generated content drafts table
+-- Generated content drafts table (includes scheduling functionality)
 CREATE TABLE generated_content_drafts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     founder_id UUID NOT NULL REFERENCES founders(id) ON DELETE CASCADE,
@@ -100,8 +100,24 @@ CREATE TABLE generated_content_drafts (
         CHECK (status IN ('pending_review', 'approved', 'rejected', 'scheduled', 'posted', 'error')),
     ai_generation_metadata JSONB,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    
+    -- Scheduling fields (merged from scheduled_content)
     scheduled_post_time TIMESTAMP WITH TIME ZONE,
-    posted_tweet_id VARCHAR(50)
+    posted_tweet_id VARCHAR(50),
+    platform VARCHAR(20) DEFAULT 'twitter',
+    priority INTEGER DEFAULT 5,
+    
+    -- Error handling fields
+    retry_count INTEGER DEFAULT 0,
+    max_retries INTEGER DEFAULT 3,
+    error_message TEXT,
+    error_code VARCHAR(50),
+    
+    -- Publishing details
+    posted_at TIMESTAMP WITH TIME ZONE,
+    tags JSONB DEFAULT '[]'::jsonb,
+    created_by UUID REFERENCES founders(id)
 );
 
 CREATE INDEX idx_content_drafts_founder_id ON generated_content_drafts(founder_id);
@@ -164,6 +180,9 @@ CREATE TRIGGER update_products_updated_at BEFORE UPDATE ON products
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_twitter_credentials_updated_at BEFORE UPDATE ON twitter_credentials
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_generated_content_drafts_updated_at BEFORE UPDATE ON generated_content_drafts
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_post_analytics_updated_at BEFORE UPDATE ON post_analytics

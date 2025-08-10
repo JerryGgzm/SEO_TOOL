@@ -343,7 +343,7 @@ class InternalRulesEngine:
             recent_posts = self.data_flow_manager.get_recent_posts(user_id, check_period)
             
             for post in recent_posts:
-                if self._calculate_similarity(content_text, post.content) > similarity_threshold:
+                if self._calculate_similarity(content_text, post.final_text) > similarity_threshold:
                     return RuleViolation(
                         rule_name=rule.name,
                         severity=RuleSeverity.WARNING,

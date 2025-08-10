@@ -255,9 +255,9 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             # 简单的管理员判断逻辑 - 可以根据需要修改
             is_admin = user_data.username == 'demo_user' or user_data.email.endswith('@admin.com')
             
-            logger.info(f"创建User对象 - id: {user_data.user_id}, username: {user_data.username}, twitter access token: {access_token}")
+            logger.info(f"创建User对象 - id: {user_data.founder_id}, username: {user_data.username}, twitter access token: {access_token}")
             return User(
-                id=user_data.user_id,
+                id=user_data.founder_id,
                 username=user_data.username,
                 email=user_data.email,
                 is_active=user_data.is_active,

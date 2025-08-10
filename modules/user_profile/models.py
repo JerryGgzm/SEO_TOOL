@@ -48,17 +48,17 @@ class ProductInfoData(BaseModel):
     brand_voice: Optional[str] = Field(None, max_length=50, description="Brand voice style")
 
 class UserProfileData(BaseModel):
-    """User profile data model"""
-    user_id: str
+    """User profile data model - now maps to founders table"""
+    founder_id: str
     email: EmailStr
     username: str = Field(..., min_length=3, max_length=50)
     full_name: Optional[str] = Field(None, max_length=100)
     company_name: Optional[str] = Field(None, max_length=100)
     role: Optional[str] = Field(None, max_length=50)
     timezone: str = Field(default="UTC")
+    is_active: bool = Field(default=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
-    is_active: bool = Field(default=True)
     product_info: Optional[ProductInfoData] = None
     
     class Config:
@@ -68,7 +68,7 @@ class UserProfileData(BaseModel):
 
 class TwitterCredentials(BaseModel):
     """Twitter authentication credentials model (for internal processing, sensitive information encrypted)"""
-    user_id: str
+    founder_id: str
     access_token: str  # Will be encrypted for storage
     refresh_token: Optional[str] = None  # Will be encrypted for storage
     token_type: str = "Bearer"
@@ -115,7 +115,7 @@ class ProductInfoUpdate(BaseModel):
 
 class TwitterAuthResponse(BaseModel):
     """Twitter OAuth response model"""
-    user_id: str
+    founder_id: str
     twitter_username: str
     access_token: str
     access_token_secret: str

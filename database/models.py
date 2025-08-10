@@ -88,7 +88,13 @@ class Founder(Base):
     
     id = Column(UUID(), primary_key=True, default=uuid.uuid4, nullable=False)
     email = Column(String(255), unique=True, nullable=False, index=True)
+    username = Column(String(50), unique=True, nullable=False, index=True, comment="Unique username for login")
     hashed_password = Column(String(255), nullable=False)
+    full_name = Column(String(100), comment="User's full name")
+    company_name = Column(String(100), comment="User's company name")
+    role = Column(String(50), comment="User's role in the company")
+    timezone = Column(String(50), default='UTC', comment="User's timezone")
+    is_active = Column(Boolean, default=True, comment="Whether the user account is active")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     settings = Column(JSONType, default=dict, comment="User interface preferences, notification settings")
@@ -99,12 +105,12 @@ class Founder(Base):
                                      cascade="all, delete-orphan", uselist=False)
     analyzed_trends = relationship("AnalyzedTrend", back_populates="founder", cascade="all, delete-orphan")
     generated_content_drafts = relationship("GeneratedContentDraft", back_populates="founder", 
-                                          cascade="all, delete-orphan")
+                                          cascade="all, delete-orphan", foreign_keys="GeneratedContentDraft.founder_id")
     automation_rules = relationship("AutomationRule", back_populates="founder", cascade="all, delete-orphan")
     post_analytics = relationship("PostAnalytic", back_populates="founder", cascade="all, delete-orphan")
     
     def __repr__(self):
-        return f"<Founder(id={self.id}, email={self.email})>"
+        return f"<Founder(id={self.id}, email={self.email}, username={self.username})>"
 
 class Product(Base):
     """Products table - stores product information and niche definitions"""
@@ -259,7 +265,7 @@ class AnalyzedTrend(Base):
 # ====================
 
 class GeneratedContentDraft(Base):
-    """Generated content drafts table - stores AI-generated content for review"""
+    """Generated content drafts table - stores AI-generated content for review and scheduling"""
     __tablename__ = 'generated_content_drafts'
     
     id = Column(UUID(), primary_key=True, default=uuid.uuid4, nullable=False)
@@ -274,13 +280,30 @@ class GeneratedContentDraft(Base):
                    comment="pending_review, approved, rejected, scheduled, posted, error")
     ai_generation_metadata = Column(JSONType, comment="AI reasoning for content generation")
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Scheduling fields (merged from scheduled_content)
     scheduled_post_time = Column(DateTime, comment="When to post if scheduled")
     posted_tweet_id = Column(String(50), index=True, comment="Twitter ID after posting")
+    platform = Column(String(20), default='twitter', comment="Publishing platform")
+    priority = Column(Integer, default=5, comment="Publishing priority (1-10)")
+    
+    # Error handling fields
+    retry_count = Column(Integer, default=0, comment="Current retry count")
+    max_retries = Column(Integer, default=3, comment="Maximum retry attempts")
+    error_message = Column(Text, comment="Error message if failed")
+    error_code = Column(String(50), comment="Error code if failed")
+    
+    # Publishing details
+    posted_at = Column(DateTime, comment="Actual posting time")
+    tags = Column(JSONType, default=list, comment="Content tags")
+    created_by = Column(UUID(), ForeignKey('founders.id'), comment="User who created/scheduled the content")
     
     # Relationships
-    founder = relationship("Founder", back_populates="generated_content_drafts")
+    founder = relationship("Founder", back_populates="generated_content_drafts", foreign_keys=[founder_id])
     analyzed_trend = relationship("AnalyzedTrend", back_populates="generated_content_drafts")
     post_analytics = relationship("PostAnalytic", back_populates="content_draft", uselist=False)
+    creator = relationship("Founder", foreign_keys=[created_by], post_update=True)
     
     # Indexes for common queries
     __table_args__ = (
@@ -310,6 +333,40 @@ class GeneratedContentDraft(Base):
         if self.seo_suggestions and 'keywords' in self.seo_suggestions:
             return self.seo_suggestions['keywords']
         return []
+    
+    # Scheduling-related properties (merged from ScheduledContent)
+    @property
+    def is_due(self) -> bool:
+        """Check if content is due for publishing"""
+        if not self.scheduled_post_time:
+            return False
+        return self.scheduled_post_time <= datetime.utcnow()
+    
+    @property
+    def is_overdue(self) -> bool:
+        """Check if content is overdue"""
+        if not self.scheduled_post_time:
+            return False
+        from datetime import timedelta
+        return self.scheduled_post_time < datetime.utcnow() - timedelta(minutes=5)
+    
+    @property
+    def should_retry(self) -> bool:
+        """Check if content should be retried"""
+        return (self.status == 'error' and 
+                self.retry_count < self.max_retries)
+    
+    @property
+    def tags_list(self) -> List[str]:
+        """Get tags as a list"""
+        if self.tags:
+            return self.tags if isinstance(self.tags, list) else []
+        return []
+    
+    @tags_list.setter
+    def tags_list(self, values: List[str]):
+        """Set tags from a list"""
+        self.tags = values
 
 # ====================
 # Automation Models
@@ -386,78 +443,21 @@ class PostAnalytic(Base):
         return (self.total_engagements / self.impressions) * 100
 
 # ====================
-# Scheduling and Publishing Models
+# Scheduling and Publishing Models  
+# Note: ScheduledContent functionality has been merged into GeneratedContentDraft
+# The ScheduledContent table has been deprecated and removed.
+# All scheduling functionality is now handled by GeneratedContentDraft table.
 # ====================
 
-class ScheduledContent(Base):
-    """Scheduled content table - stores content scheduled for future publishing"""
-    __tablename__ = 'scheduled_content'
-    
-    id = Column(UUID(), primary_key=True, default=uuid.uuid4, nullable=False)
-    content_draft_id = Column(UUID(), ForeignKey('generated_content_drafts.id'), nullable=False, index=True)
-    founder_id = Column(UUID(), ForeignKey('founders.id'), nullable=False, index=True)
-    scheduled_time = Column(DateTime, nullable=False, index=True, comment="When to publish the content")
-    status = Column(String(20), nullable=False, default='scheduled', index=True,
-                   comment="scheduled, processing, posted, failed, cancelled")
-    priority = Column(Integer, default=5, comment="Publishing priority (1-10)")
-    
-    # Publishing details
-    posted_at = Column(DateTime, comment="Actual posting time")
-    posted_tweet_id = Column(String(50), index=True, comment="Twitter ID after posting")
-    platform = Column(String(20), default='twitter', comment="Publishing platform")
-    
-    # Error handling
-    retry_count = Column(Integer, default=0, comment="Current retry count")
-    max_retries = Column(Integer, default=3, comment="Maximum retry attempts")
-    error_message = Column(Text, comment="Error message if failed")
-    error_code = Column(String(50), comment="Error code if failed")
-    
-    # Metadata
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    created_by = Column(UUID(), ForeignKey('founders.id'), nullable=False, comment="User who scheduled the content")
-    tags = Column(JSONType, default=list, comment="Content tags")
-    
-    # Relationships
-    founder = relationship("Founder", foreign_keys=[founder_id])
-    content_draft = relationship("GeneratedContentDraft", foreign_keys=[content_draft_id])
-    creator = relationship("Founder", foreign_keys=[created_by])
-    
-    # Indexes for common queries
-    __table_args__ = (
-        Index('idx_scheduled_content_due', 'scheduled_time', 'status'),
-        Index('idx_scheduled_content_founder_status', 'founder_id', 'status'),
-        Index('idx_scheduled_content_platform_status', 'platform', 'status'),
-    )
-    
-    def __repr__(self):
-        return f"<ScheduledContent(id={self.id}, scheduled_time={self.scheduled_time}, status={self.status})>"
-    
-    @property
-    def is_due(self) -> bool:
-        """Check if content is due for publishing"""
-        return self.scheduled_time <= datetime.utcnow()
-    
-    @property
-    def is_overdue(self) -> bool:
-        """Check if content is overdue"""
-        from datetime import timedelta
-        return self.scheduled_time < datetime.utcnow() - timedelta(minutes=5)
-    
-    @property
-    def should_retry(self) -> bool:
-        """Check if content should be retried"""
-        return (self.status == 'failed' and 
-                self.retry_count < self.max_retries)
-    
-    @property
-    def tags_list(self) -> List[str]:
-        """Get tags as a list"""
-        if self.tags:
-            return self.tags if isinstance(self.tags, list) else []
-        return []
-    
-    @tags_list.setter
-    def tags_list(self, values: List[str]):
-        """Set tags from a list"""
-        self.tags = values
+# ScheduledContent class removed - all functionality moved to GeneratedContentDraft
+# See GeneratedContentDraft for scheduling fields:
+# - scheduled_post_time: When to post if scheduled  
+# - platform: Publishing platform
+# - priority: Publishing priority (1-10)
+# - retry_count: Current retry count
+# - max_retries: Maximum retry attempts
+# - error_message: Error message if failed
+# - error_code: Error code if failed
+# - posted_at: Actual posting time
+# - tags: Content tags
+# - created_by: User who created/scheduled the content

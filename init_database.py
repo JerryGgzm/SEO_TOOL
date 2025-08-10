@@ -21,7 +21,7 @@ sys.path.insert(0, str(project_root))
 from sqlalchemy import create_engine, inspect
 from database import init_database, get_db_manager
 from database.models import Base
-from modules.user_profile.repository import UserProfileTable
+# UserProfileTable 已移除，现在使用统一的 founders 表
 
 def reset_database(database_url: str = None):
     """重置数据库（删除现有数据库文件）"""
@@ -76,7 +76,6 @@ def create_all_tables(reset: bool = False):
             
         # 检查关键表
         required_tables = [
-            'user_profiles',
             'founders', 
             'products',
             'twitter_credentials',

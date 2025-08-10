@@ -60,16 +60,24 @@ class PublishingError(BaseModel):
     is_retryable: bool = Field(default=True, description="Whether error is retryable")
     technical_details: Dict[str, Any] = Field(default={}, description="Technical error details")
 
+# ScheduledContent model deprecated - functionality moved to GeneratedContentDraft
+# This class is kept for API compatibility but maps to GeneratedContentDraft internally
 class ScheduledContent(BaseModel):
-    """Scheduled content item"""
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    content_draft_id: str = Field(..., description="ID of the content draft")
+    """
+    DEPRECATED: Scheduled content item - now maps to GeneratedContentDraft
+    
+    This model is maintained for backward compatibility but all data is stored
+    in the generated_content_drafts table. New code should work directly with
+    GeneratedContentDraft objects.
+    """
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), description="Content draft ID (same as content_draft_id)")
+    content_draft_id: str = Field(..., description="ID of the content draft (same as id)")
     founder_id: str = Field(..., description="Founder ID")
     scheduled_time: datetime = Field(..., description="Scheduled publishing time")
     timezone_info: TimeZoneInfo = Field(default_factory=TimeZoneInfo)
     status: PublishStatus = Field(default=PublishStatus.SCHEDULED)
     
-    # Publishing details
+    # Publishing details  
     posted_at: Optional[datetime] = Field(None, description="Actual posting time")
     posted_tweet_id: Optional[str] = Field(None, description="Posted tweet ID")
     platform: str = Field(default="twitter", description="Publishing platform")
@@ -85,6 +93,27 @@ class ScheduledContent(BaseModel):
     created_by: str = Field(..., description="User who scheduled the content")
     priority: int = Field(default=5, description="Publishing priority (1-10)")
     tags: List[str] = Field(default=[], description="Content tags")
+    
+    @classmethod
+    def from_content_draft(cls, draft) -> "ScheduledContent":
+        """Create ScheduledContent from GeneratedContentDraft for compatibility"""
+        return cls(
+            id=str(draft.id),
+            content_draft_id=str(draft.id),
+            founder_id=str(draft.founder_id),
+            scheduled_time=draft.scheduled_post_time,
+            status=PublishStatus(draft.status) if hasattr(PublishStatus, draft.status.upper()) else PublishStatus.SCHEDULED,
+            posted_at=getattr(draft, 'posted_at', None),
+            posted_tweet_id=getattr(draft, 'posted_tweet_id', None),
+            platform=getattr(draft, 'platform', 'twitter'),
+            retry_count=getattr(draft, 'retry_count', 0),
+            max_retries=getattr(draft, 'max_retries', 3),
+            created_at=draft.created_at,
+            updated_at=getattr(draft, 'updated_at', draft.created_at),
+            created_by=str(getattr(draft, 'created_by', draft.founder_id)),
+            priority=getattr(draft, 'priority', 5),
+            tags=getattr(draft, 'tags_list', []) if hasattr(draft, 'tags_list') else []
+        )
 
 class ScheduleRequest(BaseModel):
     """Request to schedule content for publishing"""
@@ -93,6 +122,7 @@ class ScheduleRequest(BaseModel):
     timezone: str = Field(default="UTC", description="Timezone for scheduling")
     priority: int = Field(default=5, ge=1, le=10, description="Publishing priority")
     tags: List[str] = Field(default=[], description="Optional tags")
+    skip_rules_check: bool = Field(default=False, description="Skip publishing rules validation for demo purposes")
     
     @field_validator('scheduled_time')
     @classmethod

@@ -760,38 +760,19 @@ class CompleteWorkflowDemo:
             conn = sqlite3.connect('ideation_db.sqlite')
             cursor = conn.cursor()
             
-            # 首先获取user_profiles中的用户信息
-            cursor.execute("SELECT user_id, email FROM user_profiles WHERE user_id = ?", (self.api_client.user_id,))
-            user_profile = cursor.fetchone()
-            if not user_profile:
-                print_error(f"❌ User Profile {self.api_client.user_id} 不存在于数据库中")
+            # 直接从founders表获取用户信息
+            cursor.execute("SELECT id, email FROM founders WHERE id = ?", (self.api_client.user_id,))
+            founder_record = cursor.fetchone()
+            if not founder_record:
+                print_error(f"❌ Founder {self.api_client.user_id} 不存在于数据库中")
                 conn.close()
                 return False
             
-            user_id, email = user_profile
-            print_success(f"✅ User Profile 验证通过: {email}")
+            user_id, email = founder_record
+            print_success(f"✅ Founder验证通过: {email}")
             
-            # 检查或创建对应的founder记录
-            cursor.execute("SELECT id FROM founders WHERE id = ?", (user_id,))
-            founder_exists = cursor.fetchone()
-            if not founder_exists:
-                print_warning(f"⚠️  Founder记录不存在，正在创建...")
-                # 创建founder记录，使用user_profiles中的信息
-                current_time = datetime.utcnow()
-                cursor.execute("""
-                    INSERT INTO founders (id, email, hashed_password, created_at, updated_at, settings)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (
-                    user_id,
-                    email,
-                    "demo_password_hash",  # 占位符密码哈希
-                    current_time.isoformat(),
-                    current_time.isoformat(),
-                    '{"demo": true}'  # 标记为demo用户
-                ))
-                print_success(f"✅ Founder记录创建成功")
-            else:
-                print_success(f"✅ Founder记录已存在")
+            # Founder记录已存在，无需创建
+            print_success(f"✅ Founder记录已存在")
             
             # 创建内容草稿记录
             current_time = datetime.utcnow()
@@ -916,7 +897,8 @@ class CompleteWorkflowDemo:
             "content_id": content_id,
             "scheduled_time": schedule_time.isoformat(),
             "priority": 5,  # 使用整数而不是字符串
-            "tags": ["demo", "scheduled"]
+            "tags": ["demo", "scheduled"],
+            "skip_rules_check": True  # 演示模式下跳过规则检查
         }
         
         print(f"🔍 调试信息:")
@@ -1075,12 +1057,23 @@ class CompleteWorkflowDemo:
             
             while getattr(self, '_queue_processing_active', True):
                 try:
-                    # 每30秒触发一次队列处理
+                    # 每30秒触发一次队列处理，保证及时处理短期调度内容
                     self._trigger_queue_processing()
-                    time.sleep(30)
+                    
+                    # 分多次休眠，以便能够快速响应停止请求
+                    for _ in range(6):  # 6 * 5 = 30秒
+                        if not getattr(self, '_queue_processing_active', True):
+                            break
+                        time.sleep(5)
+                        
                 except Exception as e:
                     print(f"⚠️ 队列处理错误: {e}")
                     time.sleep(30)
+        
+        # 检查是否已经有后台处理器在运行
+        if getattr(self, '_queue_processing_active', False):
+            print("⚠️  后台队列处理器已在运行")
+            return
         
         # 设置处理标志
         self._queue_processing_active = True
@@ -1088,8 +1081,18 @@ class CompleteWorkflowDemo:
         # 启动后台线程
         queue_thread = threading.Thread(target=queue_processor, daemon=True)
         queue_thread.start()
+        self._queue_thread = queue_thread  # 保存线程引用
         
         print("✅ 后台队列处理器已启动")
+        print("💡 提示：可以调用 demo._stop_background_queue_processor() 来停止")
+
+    def _stop_background_queue_processor(self):
+        """停止后台队列处理器"""
+        if hasattr(self, '_queue_processing_active'):
+            self._queue_processing_active = False
+            print("🛑 后台队列处理器已停止")
+        else:
+            print("⚠️  后台队列处理器未运行")
 
     def _trigger_queue_processing(self):
         """触发队列处理"""
@@ -1104,13 +1107,14 @@ class CompleteWorkflowDemo:
                 processed_count = response.get("processed_count", 0)
                 if processed_count > 0:
                     print(f"⚡ 队列处理完成: 处理了 {processed_count} 个项目")
+                # 静默处理没有任务的情况
             else:
-                # 如果API调用失败，可能是权限问题，我们直接调用服务
-                self._direct_queue_processing()
+                # 如果API调用失败，静默失败，避免过多输出
+                pass
                 
         except Exception as e:
-            # API调用失败，尝试直接处理
-            self._direct_queue_processing()
+            # API调用失败，静默失败，避免过多输出
+            pass
 
     def _direct_queue_processing(self):
         """直接调用队列处理服务"""

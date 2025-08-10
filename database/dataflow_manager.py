@@ -30,7 +30,7 @@ class DataFlowManager:
     Manages data flow between modules according to DFD specifications
     Implements the data flow patterns described in section 2.4.2
     """
-
+    
     def __init__(self, db_session: Session):
         self.db_session = db_session
         # OAuth code verifier 存储已迁移到 UserProfileService
@@ -47,41 +47,29 @@ class DataFlowManager:
     # DFD 1: User Configuration & Product Information Entry
     # ====================
     
-    def process_founder_registration(self, registration_data: Dict[str, Any]) -> Optional[str]:
-        """
-        Process founder registration flow
-        
-        Flow: Founder -> UI -> UserProfileModule -> Database
-        
-        Args:
-            registration_data: Registration information from UI
-            
-        Returns:
-            Founder ID if successful, None otherwise
-        """
+    def process_founder_registration(self, registration_data: Dict[str, Any]) -> Tuple[bool, Optional[str], Optional[str]]:
+        """Process founder registration (DFD 1.1)"""
         try:
-            # Validate email uniqueness
-            existing_founder = self.founder_repo.get_by_email(registration_data['email'])
-            if existing_founder:
-                logger.warning(f"Registration failed: Email already exists: {registration_data['email']}")
-                return None
-            
             # Create founder record
-            founder = self.founder_repo.create_founder(
+            founder = Founder(
                 email=registration_data['email'],
+                username=registration_data.get('username', registration_data['email'].split('@')[0]),
                 hashed_password=registration_data['hashed_password'],
-                settings=registration_data.get('settings', {})
+                full_name=registration_data.get('full_name'),
+                company_name=registration_data.get('company_name'),
+                role=registration_data.get('role'),
+                timezone=registration_data.get('timezone', 'UTC'),
+                is_active=True
             )
             
-            if not founder:
-                return None
+            self.db_session.add(founder)
+            self.db_session.commit()
             
-            logger.info(f"Founder registered successfully: {founder.email}")
-            return str(founder.id)
+            return True, str(founder.id), None
             
         except Exception as e:
-            logger.error(f"Founder registration failed: {e}")
-            return None
+            self.db_session.rollback()
+            return False, None, str(e)
     
     def process_product_information_entry(self, founder_id: str, 
                                         product_data: Dict[str, Any]) -> Optional[str]:
@@ -404,6 +392,7 @@ class DataFlowManager:
                         'pain_points': trend.pain_points_list,
                         'questions': trend.questions_list,
                         'focus_points': trend.focus_points_list,
+                        
                         'is_micro_trend': trend.is_micro_trend,
                         'relevance_score': trend.niche_relevance_score,
                         'potential_score': trend.trend_potential_score
@@ -1582,65 +1571,38 @@ class DataFlowManager:
             return False
     
     def create_scheduled_content(self, scheduled_content_data: Dict[str, Any]) -> Optional[str]:
-        """Create scheduled content entry"""
+        """
+        DEPRECATED: Create scheduled content by updating the existing content draft.
+        
+        Note: The scheduled_content table has been removed. This method now directly
+        updates the GeneratedContentDraft table with scheduling information.
+        All scheduling functionality is consolidated in the generated_content_drafts table.
+        """
         try:
-            # Create scheduled content table if it doesn't exist
-            self.db_session.execute(text("""
-                CREATE TABLE IF NOT EXISTS scheduled_content (
-                    id TEXT PRIMARY KEY,
-                    content_draft_id TEXT NOT NULL,
-                    founder_id TEXT NOT NULL,
-                    scheduled_time TEXT NOT NULL,
-                    status TEXT DEFAULT 'scheduled',
-                    posted_at TEXT,
-                    posted_tweet_id TEXT,
-                    platform TEXT DEFAULT 'twitter',
-                    retry_count INTEGER DEFAULT 0,
-                    max_retries INTEGER DEFAULT 3,
-                    priority INTEGER DEFAULT 5,
-                    tags TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    created_by TEXT,
-                    error_info TEXT,
-                    FOREIGN KEY (founder_id) REFERENCES founders(id),
-                    FOREIGN KEY (content_draft_id) REFERENCES generated_content_drafts(id)
-                )
-            """))
+            content_draft_id = scheduled_content_data['content_draft_id']
             
-            # Generate ID if not provided
-            scheduled_id = scheduled_content_data.get('id', str(uuid.uuid4()))
+            # Update the content draft with scheduling information
+            # This replaces the old separate scheduled_content table
+            success = self.content_repo.update(
+                content_draft_id,
+                status='scheduled',
+                scheduled_post_time=scheduled_content_data['scheduled_time'],
+                platform=scheduled_content_data.get('platform', 'twitter'),
+                priority=scheduled_content_data.get('priority', 5),
+                retry_count=scheduled_content_data.get('retry_count', 0),
+                max_retries=scheduled_content_data.get('max_retries', 3),
+                tags=scheduled_content_data.get('tags', []),
+                created_by=scheduled_content_data.get('created_by')
+            )
             
-            # Insert scheduled content
-            self.db_session.execute(text("""
-                INSERT INTO scheduled_content (
-                    id, content_draft_id, founder_id, scheduled_time, 
-                    status, platform, retry_count, max_retries, 
-                    priority, tags, created_by
-                ) VALUES (:id, :content_draft_id, :founder_id, :scheduled_time, 
-                         :status, :platform, :retry_count, :max_retries, 
-                         :priority, :tags, :created_by)
-            """), {
-                'id': scheduled_id,
-                'content_draft_id': scheduled_content_data['content_draft_id'],
-                'founder_id': scheduled_content_data['founder_id'],
-                'scheduled_time': scheduled_content_data['scheduled_time'].isoformat() if hasattr(scheduled_content_data['scheduled_time'], 'isoformat') else scheduled_content_data['scheduled_time'],
-                'status': scheduled_content_data.get('status', 'scheduled'),
-                'platform': scheduled_content_data.get('platform', 'twitter'),
-                'retry_count': scheduled_content_data.get('retry_count', 0),
-                'max_retries': scheduled_content_data.get('max_retries', 3),
-                'priority': scheduled_content_data.get('priority', 5),
-                'tags': json.dumps(scheduled_content_data.get('tags', [])),
-                'created_by': scheduled_content_data.get('created_by')
-            })
+            if success:
+                logger.info(f"Scheduled content draft (unified table): {content_draft_id}")
+                return content_draft_id
             
-            self.db_session.commit()
-            logger.info(f"Created scheduled content {scheduled_id}")
-            return scheduled_id
+            return None
             
         except Exception as e:
-            logger.error(f"Failed to create scheduled content: {e}")
-            self.db_session.rollback()
+            logger.error(f"Failed to schedule content: {e}")
             return None
     
     def get_content_drafts_by_status(self, founder_id: str, status_list: List[str], 
@@ -1711,79 +1673,42 @@ class DataFlowManager:
             return False
 
     def get_scheduled_content_by_draft_id(self, draft_id: str) -> Optional[Any]:
-        """Get scheduled content by draft ID"""
+        """
+        DEPRECATED: Get scheduled content by draft ID.
+        
+        Note: scheduled_content table removed. This now returns the GeneratedContentDraft
+        object directly since all scheduling data is stored there.
+        """
         try:
-            # 处理UUID格式 - 支持字符串和UUID对象
-            import uuid
-            try:
-                # 如果已经是UUID对象，直接转换为字符串
-                if isinstance(draft_id, uuid.UUID):
-                    draft_id = str(draft_id)
-                else:
-                    # 如果是字符串，验证UUID格式
-                    uuid_obj = uuid.UUID(draft_id)
-                    draft_id = str(uuid_obj)
-            except (ValueError, TypeError) as e:
-                logger.error(f"Invalid UUID format: {draft_id}, error: {e}")
-                return None
-                
-            return self.db_session.query(ScheduledContent).filter(
-                ScheduledContent.content_draft_id == draft_id
-            ).first()
+            return self.content_repo.get_by_id(draft_id)
         except Exception as e:
             logger.error(f"Failed to get scheduled content by draft ID {draft_id}: {e}")
             return None
 
     def get_scheduled_content_by_id(self, scheduled_id: str) -> Optional[Any]:
-        """Get scheduled content by scheduled content ID"""
+        """
+        DEPRECATED: Get scheduled content by ID.
+        
+        Note: scheduled_content table removed. This now returns the GeneratedContentDraft
+        object directly since scheduled_id is the same as content_draft_id.
+        """
         try:
-            # 处理UUID格式 - 支持字符串和UUID对象
-            import uuid
-            try:
-                # 如果已经是UUID对象，直接转换为字符串
-                if isinstance(scheduled_id, uuid.UUID):
-                    scheduled_id = str(scheduled_id)
-                else:
-                    # 如果是字符串，验证UUID格式
-                    uuid_obj = uuid.UUID(scheduled_id)
-                    scheduled_id = str(uuid_obj)
-            except (ValueError, TypeError) as e:
-                logger.error(f"Invalid UUID format: {scheduled_id}, error: {e}")
-                return None
-                
-            return self.db_session.query(ScheduledContent).filter(
-                ScheduledContent.id == scheduled_id
-            ).first()
+            return self.content_repo.get_by_id(scheduled_id)
         except Exception as e:
             logger.error(f"Failed to get scheduled content by ID {scheduled_id}: {e}")
             return None
 
     def update_scheduled_content(self, scheduled_id: str, updates: Dict[str, Any]) -> bool:
-        """Update scheduled content"""
+        """
+        DEPRECATED: Update scheduled content.
+        
+        Note: scheduled_content table removed. This now updates the GeneratedContentDraft
+        table directly since scheduled_id is the same as content_draft_id.
+        """
         try:
-            scheduled = self.db_session.query(ScheduledContent).filter(
-                ScheduledContent.id == scheduled_id
-            ).first()
-            
-            if not scheduled:
-                logger.error(f"Scheduled content not found: {scheduled_id}")
-                return False
-            
-            # Update fields
-            for field, value in updates.items():
-                if hasattr(scheduled, field):
-                    setattr(scheduled, field, value)
-            
-            # Always update the updated_at timestamp
-            scheduled.updated_at = datetime.now(UTC)
-            
-            self.db_session.commit()
-            logger.info(f"Scheduled content updated: {scheduled_id}")
-            return True
-            
+            return self.content_repo.update(scheduled_id, **updates) is not None
         except Exception as e:
             logger.error(f"Failed to update scheduled content {scheduled_id}: {e}")
-            self.db_session.rollback()
             return False
 
     def create_content_draft(self, draft_data: Dict[str, Any]) -> Optional[str]:
@@ -1896,11 +1821,11 @@ class DataFlowManager:
             start_of_day = datetime.combine(date, datetime.min.time())
             end_of_day = datetime.combine(date, datetime.max.time())
             
-            count = self.db_session.query(ScheduledContent).filter(
-                ScheduledContent.founder_id == user_id,
-                ScheduledContent.status == 'posted',
-                ScheduledContent.posted_at >= start_of_day,
-                ScheduledContent.posted_at <= end_of_day
+            count = self.db_session.query(GeneratedContentDraft).filter(
+                GeneratedContentDraft.founder_id == user_id,
+                GeneratedContentDraft.status == 'posted',
+                GeneratedContentDraft.posted_at >= start_of_day,
+                GeneratedContentDraft.posted_at <= end_of_day
             ).count()
             
             return count
@@ -1911,10 +1836,10 @@ class DataFlowManager:
     def get_last_post_time(self, user_id: str) -> Optional[datetime]:
         """Get the time of the last post for user"""
         try:
-            last_post = self.db_session.query(ScheduledContent).filter(
-                ScheduledContent.founder_id == user_id,
-                ScheduledContent.status == 'posted'
-            ).order_by(ScheduledContent.posted_at.desc()).first()
+            last_post = self.db_session.query(GeneratedContentDraft).filter(
+                GeneratedContentDraft.founder_id == user_id,
+                GeneratedContentDraft.status == 'posted'
+            ).order_by(GeneratedContentDraft.posted_at.desc()).first()
             
             return last_post.posted_at if last_post else None
         except Exception as e:
@@ -1924,18 +1849,18 @@ class DataFlowManager:
     def get_scheduled_posts_in_timeframe(self, user_id: str, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
         """Get scheduled posts in a specific timeframe"""
         try:
-            scheduled_posts = self.db_session.query(ScheduledContent).filter(
-                ScheduledContent.founder_id == user_id,
-                ScheduledContent.status.in_(['scheduled', 'processing']),
-                ScheduledContent.scheduled_time >= start_time,
-                ScheduledContent.scheduled_time <= end_time
+            scheduled_posts = self.db_session.query(GeneratedContentDraft).filter(
+                GeneratedContentDraft.founder_id == user_id,
+                GeneratedContentDraft.status.in_(['scheduled', 'processing']),
+                GeneratedContentDraft.scheduled_post_time >= start_time,
+                GeneratedContentDraft.scheduled_post_time <= end_time
             ).all()
             
             return [
                 {
                     "id": str(post.id),
-                    "scheduled_time": post.scheduled_time,
-                    "content_draft_id": str(post.content_draft_id),
+                    "scheduled_time": post.scheduled_post_time,
+                    "content_draft_id": str(post.id),
                     "status": post.status
                 }
                 for post in scheduled_posts
@@ -1995,11 +1920,11 @@ class DataFlowManager:
             start_of_day = datetime.combine(date, datetime.min.time())
             end_of_day = datetime.combine(date, datetime.max.time())
             
-            count = self.db_session.query(ScheduledContent).filter(
-                ScheduledContent.founder_id == user_id,
-                ScheduledContent.status == 'posted',
-                ScheduledContent.posted_at >= start_of_day,
-                ScheduledContent.posted_at <= end_of_day
+            count = self.db_session.query(GeneratedContentDraft).filter(
+                GeneratedContentDraft.founder_id == user_id,
+                GeneratedContentDraft.status == 'posted',
+                GeneratedContentDraft.posted_at >= start_of_day,
+                GeneratedContentDraft.posted_at <= end_of_day
             ).count()
             
             return count
@@ -2010,10 +1935,10 @@ class DataFlowManager:
     def get_last_post_time(self, user_id: str) -> Optional[datetime]:
         """Get the time of the last post for user"""
         try:
-            last_post = self.db_session.query(ScheduledContent).filter(
-                ScheduledContent.founder_id == user_id,
-                ScheduledContent.status == 'posted'
-            ).order_by(ScheduledContent.posted_at.desc()).first()
+            last_post = self.db_session.query(GeneratedContentDraft).filter(
+                GeneratedContentDraft.founder_id == user_id,
+                GeneratedContentDraft.status == 'posted'
+            ).order_by(GeneratedContentDraft.posted_at.desc()).first()
             
             return last_post.posted_at if last_post else None
         except Exception as e:
@@ -2023,18 +1948,18 @@ class DataFlowManager:
     def get_scheduled_posts_in_timeframe(self, user_id: str, start_time: datetime, end_time: datetime) -> List[Dict[str, Any]]:
         """Get scheduled posts in a specific timeframe"""
         try:
-            scheduled_posts = self.db_session.query(ScheduledContent).filter(
-                ScheduledContent.founder_id == user_id,
-                ScheduledContent.status.in_(['scheduled', 'processing']),
-                ScheduledContent.scheduled_time >= start_time,
-                ScheduledContent.scheduled_time <= end_time
+            scheduled_posts = self.db_session.query(GeneratedContentDraft).filter(
+                GeneratedContentDraft.founder_id == user_id,
+                GeneratedContentDraft.status.in_(['scheduled', 'processing']),
+                GeneratedContentDraft.scheduled_post_time >= start_time,
+                GeneratedContentDraft.scheduled_post_time <= end_time
             ).all()
             
             return [
                 {
                     "id": str(post.id),
-                    "scheduled_time": post.scheduled_time,
-                    "content_draft_id": str(post.content_draft_id),
+                    "scheduled_time": post.scheduled_post_time,
+                    "content_draft_id": str(post.id),
                     "status": post.status
                 }
                 for post in scheduled_posts
@@ -2048,10 +1973,10 @@ class DataFlowManager:
         try:
             since_date = datetime.utcnow() - timedelta(days=days)
             
-            recent_posts = self.db_session.query(ScheduledContent).filter(
-                ScheduledContent.founder_id == user_id,
-                ScheduledContent.status == 'posted',
-                ScheduledContent.posted_at >= since_date
+            recent_posts = self.db_session.query(GeneratedContentDraft).filter(
+                GeneratedContentDraft.founder_id == user_id,
+                GeneratedContentDraft.status == 'posted',
+                GeneratedContentDraft.posted_at >= since_date
             ).all()
             
             return recent_posts
@@ -2068,8 +1993,8 @@ class DataFlowManager:
             logger.info(f"Checking for content due before: {current_time}")
             
             # Get all scheduled content first, then filter in Python due to SQLite datetime issues
-            all_scheduled = self.db_session.query(ScheduledContent).filter(
-                ScheduledContent.status == 'scheduled'
+            all_scheduled = self.db_session.query(GeneratedContentDraft).filter(
+                GeneratedContentDraft.status == 'scheduled'
             ).all()
             
             logger.info(f"Found {len(all_scheduled)} total scheduled content items")
@@ -2079,14 +2004,14 @@ class DataFlowManager:
             for content in all_scheduled:
                 try:
                     logger.info(f"Processing content {content.id}:")
-                    logger.info(f"  Raw scheduled_time: {content.scheduled_time} (type: {type(content.scheduled_time)})")
+                    logger.info(f"  Raw scheduled_post_time: {content.scheduled_post_time} (type: {type(content.scheduled_post_time)})")
                     
                     # Handle both datetime objects and string representations
-                    if isinstance(content.scheduled_time, str):
+                    if isinstance(content.scheduled_post_time, str):
                         # Parse string to datetime
                         try:
                             from dateutil import parser
-                            scheduled_dt = parser.parse(content.scheduled_time)
+                            scheduled_dt = parser.parse(content.scheduled_post_time)
                             logger.info(f"  Parsed string to datetime: {scheduled_dt}")
                         except ImportError:
                             # Fallback to manual parsing if dateutil not available
@@ -2094,16 +2019,16 @@ class DataFlowManager:
                             # Try common formats
                             for fmt in ['%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S', '%Y-%m-%dT%H:%M:%S.%f', '%Y-%m-%dT%H:%M:%S']:
                                 try:
-                                    scheduled_dt = dt_module.datetime.strptime(content.scheduled_time, fmt)
+                                    scheduled_dt = dt_module.datetime.strptime(content.scheduled_post_time, fmt)
                                     logger.info(f"  Parsed with format {fmt}: {scheduled_dt}")
                                     break
                                 except ValueError:
                                     continue
                             else:
-                                logger.error(f"  Could not parse datetime string: {content.scheduled_time}")
+                                logger.error(f"  Could not parse datetime string: {content.scheduled_post_time}")
                                 continue
                     else:
-                        scheduled_dt = content.scheduled_time
+                        scheduled_dt = content.scheduled_post_time
                         logger.info(f"  Using datetime object: {scheduled_dt}")
                     
                     # Remove timezone info for comparison if present
@@ -2123,7 +2048,7 @@ class DataFlowManager:
                         logger.info(f"  Time until due: {time_diff:.2f} seconds")
                         
                 except Exception as parse_error:
-                    logger.warning(f"Failed to parse scheduled_time for content {content.id}: {parse_error}")
+                    logger.warning(f"Failed to parse scheduled_post_time for content {content.id}: {parse_error}")
                     import traceback
                     logger.warning(f"Stack trace: {traceback.format_exc()}")
                     continue
@@ -2131,7 +2056,7 @@ class DataFlowManager:
             # Sort by priority and scheduled time
             due_content.sort(key=lambda x: (
                 -(x.priority if x.priority is not None else 5),  # Higher priority first
-                x.scheduled_time  # Earlier time first
+                x.scheduled_post_time  # Earlier time first
             ))
             
             # Limit results
@@ -2145,9 +2070,9 @@ class DataFlowManager:
                 try:
                     queue_item = ContentQueueItem(
                         id=str(content.id),
-                        content_draft_id=str(content.content_draft_id),
+                        content_draft_id=str(content.id),
                         founder_id=str(content.founder_id),
-                        scheduled_time=content.scheduled_time,
+                        scheduled_time=content.scheduled_post_time,
                         priority=content.priority if content.priority is not None else 5,
                         status=content.status,
                         platform=content.platform if content.platform else 'twitter',

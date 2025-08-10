@@ -29,6 +29,44 @@ class RateLimitError(TwitterAPIError):
         super().__init__(message, status_code=429)
         self.reset_time = reset_time
         self.remaining = remaining
+    
+    def __str__(self):
+        import time
+        from datetime import datetime, timedelta
+        
+        error_msg = f"TwitterAPIError: {self.message} (HTTP 429)"
+        
+        # Add rate limit details
+        error_msg += f"\n📊 速率限制详情:"
+        error_msg += f"\n  • 剩余请求次数: {self.remaining}"
+        
+        if self.reset_time and self.reset_time > 0:
+            try:
+                current_time = int(time.time())
+                wait_seconds = self.reset_time - current_time
+                
+                if wait_seconds > 0:
+                    # Convert to minutes and seconds
+                    wait_minutes = wait_seconds // 60
+                    wait_seconds_remainder = wait_seconds % 60
+                    
+                    reset_datetime = datetime.fromtimestamp(self.reset_time)
+                    error_msg += f"\n  • 限制重置时间: {reset_datetime.strftime('%H:%M:%S')}"
+                    
+                    if wait_minutes > 0:
+                        error_msg += f"\n  ⏰ 还需等待: {wait_minutes}分{wait_seconds_remainder}秒"
+                    else:
+                        error_msg += f"\n  ⏰ 还需等待: {wait_seconds_remainder}秒"
+                        
+                    error_msg += f"\n💡 建议: 请等待后重试，或使用调度功能分散发布时间"
+                else:
+                    error_msg += f"\n  ✅ 速率限制应该已重置，可以重试"
+            except:
+                error_msg += f"\n  ⏰ 重置时间戳: {self.reset_time}"
+        else:
+            error_msg += f"\n  ⏰ 建议等待15-30分钟后重试"
+            
+        return error_msg
 
 class AuthenticationError(TwitterAPIError):
     """Raised when authentication fails"""

@@ -742,36 +742,31 @@ async def get_scheduled_content_status(
                 detail="Access denied"
             )
         
-        # Get content draft information
-        content_draft = None
-        if scheduled_content.content_draft_id:
-            content_draft = service.data_flow_manager.get_content_draft_by_id(
-                scheduled_content.content_draft_id
-            )
+        # Note: scheduled_content is now GeneratedContentDraft itself (after table consolidation)
+        # No need to fetch content_draft separately
         
         # Prepare response
         response_data = {
             "scheduled_id": scheduled_id,
             "status": scheduled_content.status,
-            "scheduled_time": scheduled_content.scheduled_time.isoformat() if scheduled_content.scheduled_time else None,
+            "scheduled_time": scheduled_content.scheduled_post_time.isoformat() if scheduled_content.scheduled_post_time else None,
             "created_at": scheduled_content.created_at.isoformat() if scheduled_content.created_at else None,
-            "updated_at": scheduled_content.updated_at.isoformat() if scheduled_content.updated_at else None,
+            "updated_at": scheduled_content.updated_at.isoformat() if hasattr(scheduled_content, 'updated_at') and scheduled_content.updated_at else None,
             "retry_count": getattr(scheduled_content, 'retry_count', 0),
             "posted_tweet_id": getattr(scheduled_content, 'posted_tweet_id', None),
             "error_message": getattr(scheduled_content, 'error_message', None),
-            "priority": getattr(scheduled_content, 'priority', 'normal'),
-            "tags": getattr(scheduled_content, 'tags', [])
+            "priority": getattr(scheduled_content, 'priority', 5),
+            "tags": getattr(scheduled_content, 'tags_list', [])
         }
         
-        # Add content information if available
-        if content_draft:
-            response_data["content_info"] = {
-                "content_id": str(content_draft.id),
-                "content_type": content_draft.content_type,
-                "content_preview": (content_draft.final_text)[:100] + "..." 
-                                 if content_draft.final_text else "No content",
-                "content_status": content_draft.status
-            }
+        # Add content information (scheduled_content is the content draft)
+        response_data["content_info"] = {
+            "content_id": str(scheduled_content.id),
+            "content_type": scheduled_content.content_type,
+            "content_preview": (scheduled_content.final_text)[:100] + "..." 
+                             if scheduled_content.final_text else "No content",
+            "content_status": scheduled_content.status
+        }
         
         logger.info(f"Retrieved status for scheduled content {scheduled_id}")
         

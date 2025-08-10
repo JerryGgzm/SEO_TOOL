@@ -152,39 +152,37 @@ class SchedulingPostingService:
                     message=f"Content status '{content_draft.status}' is not valid for scheduling"
                 )
             
-            # Check publishing rules
-            rule_check = await self.check_publishing_rules(
-                user_id, schedule_request.content_id, schedule_request.scheduled_time
-            )
-            
-            if not rule_check.can_publish:
-                return ScheduleResponse(
-                    success=False,
-                    message="Scheduling violates publishing rules",
-                    rule_violations=rule_check.violations
-                )
-            
-            # Create scheduled content entry
-            scheduled_content = ScheduledContent(
-                content_draft_id=schedule_request.content_id,
-                founder_id=user_id,
-                scheduled_time=schedule_request.scheduled_time,
-                status=PublishStatus.SCHEDULED,
-                created_by=user_id,
-                priority=schedule_request.priority,
-                tags=schedule_request.tags
-            )
-            
-            # Save to database
-            saved_id = self.data_flow_manager.create_scheduled_content(scheduled_content.dict())
-            
-            if saved_id:
-                # Update content draft status
-                self.data_flow_manager.update_content_draft(
-                    schedule_request.content_id,
-                    {'status': 'scheduled', 'scheduled_post_time': schedule_request.scheduled_time}
+            # Check publishing rules (unless explicitly skipped)
+            if not schedule_request.skip_rules_check:
+                rule_check = await self.check_publishing_rules(
+                    user_id, schedule_request.content_id, schedule_request.scheduled_time
                 )
                 
+                if not rule_check.can_publish:
+                    return ScheduleResponse(
+                        success=False,
+                        message="Scheduling violates publishing rules",
+                        rule_violations=rule_check.violations
+                    )
+            else:
+                logger.info(f"Skipping rules check for content {schedule_request.content_id} as requested")
+            
+            # Schedule content by updating the content draft directly
+            scheduled_content_data = {
+                'content_draft_id': schedule_request.content_id,
+                'founder_id': user_id,
+                'scheduled_time': schedule_request.scheduled_time,
+                'status': 'scheduled',
+                'platform': 'twitter',
+                'priority': schedule_request.priority,
+                'tags': schedule_request.tags,
+                'created_by': user_id
+            }
+            
+            # Save to database (this now updates the content draft)
+            saved_id = self.data_flow_manager.create_scheduled_content(scheduled_content_data)
+            
+            if saved_id:
                 # Record analytics
                 await self._record_scheduling_analytics(user_id, 'content_scheduled')
                 
@@ -438,11 +436,11 @@ class SchedulingPostingService:
             True if successful, False otherwise
         """
         try:
-            # Get scheduled content
-            scheduled_content = self.data_flow_manager.get_scheduled_content_by_draft_id(content_id)
+            # Get content draft (now unified table)
+            scheduled_content = self.data_flow_manager.get_content_draft_by_id(content_id)
             
-            if not scheduled_content or scheduled_content.founder_id != user_id:
-                logger.warning(f"Scheduled content not found for {content_id}")
+            if not scheduled_content or str(scheduled_content.founder_id) != str(user_id):
+                logger.warning(f"Content draft not found for {content_id}")
                 return False
             
             # Prepare update data
@@ -469,16 +467,10 @@ class SchedulingPostingService:
             
             # Handle failed publishing
             elif status_request.status == PublishStatus.FAILED:
-                error_info = PublishingError(
-                    error_code=status_request.error_code or "UNKNOWN_ERROR",
-                    error_message=status_request.error_message or "Publishing failed",
-                    retry_count=scheduled_content.retry_count + 1,
-                    last_retry_at=datetime.utcnow(),
-                    technical_details=status_request.technical_details
-                )
-                
-                update_data['error_info'] = error_info.dict()
-                update_data['retry_count'] = scheduled_content.retry_count + 1
+                # Update error fields directly (GeneratedContentDraft has error_message and error_code)
+                update_data['error_message'] = status_request.error_message or "Publishing failed"
+                update_data['error_code'] = status_request.error_code or "UNKNOWN_ERROR"
+                update_data['retry_count'] = (scheduled_content.retry_count or 0) + 1
                 
                 # Schedule retry if appropriate
                 if (scheduled_content.retry_count < scheduled_content.max_retries and 
@@ -486,13 +478,13 @@ class SchedulingPostingService:
                     update_data['status'] = PublishStatus.RETRY_PENDING.value
                     
                     # Calculate retry time
-                    retry_delay = self._calculate_retry_delay(scheduled_content.retry_count)
+                    retry_delay = self._calculate_retry_delay(scheduled_content.retry_count or 0)
                     retry_time = datetime.utcnow() + timedelta(minutes=retry_delay)
-                    update_data['scheduled_time'] = retry_time
+                    update_data['scheduled_post_time'] = retry_time
             
-            # Update scheduled content
-            success = self.data_flow_manager.update_scheduled_content(
-                str(scheduled_content.id), update_data
+            # Update content draft (consolidated table)
+            success = self.data_flow_manager.update_content_draft(
+                content_id, update_data
             )
             
             if success:

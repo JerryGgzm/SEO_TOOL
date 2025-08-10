@@ -18,7 +18,7 @@ class MockDataFlowManager:
     
     def __init__(self):
         self.content_drafts = {}
-        self.scheduled_content = {}
+        # Note: scheduled_content removed - now using content_drafts with scheduling fields
         self.user_preferences = {}
         self.analytics_data = {}
         self.call_log = []
@@ -34,16 +34,31 @@ class MockDataFlowManager:
         return drafts[offset:offset+limit]
     
     def create_scheduled_content(self, scheduled_content_data):
+        """DEPRECATED: Now updates content_drafts directly instead of separate scheduled_content"""
         self.call_log.append(('create_scheduled_content', scheduled_content_data))
-        content_id = str(uuid.uuid4())
-        self.scheduled_content[content_id] = scheduled_content_data
-        return content_id
+        content_draft_id = scheduled_content_data['content_draft_id']
+        
+        # Update the content draft with scheduling information (unified table approach)
+        if content_draft_id in self.content_drafts:
+            self.content_drafts[content_draft_id].update({
+                'status': 'scheduled',
+                'scheduled_post_time': scheduled_content_data['scheduled_time'],
+                'platform': scheduled_content_data.get('platform', 'twitter'),
+                'priority': scheduled_content_data.get('priority', 5),
+                'retry_count': scheduled_content_data.get('retry_count', 0),
+                'max_retries': scheduled_content_data.get('max_retries', 3),
+                'created_by': scheduled_content_data.get('created_by')
+            })
+            return content_draft_id
+        return None
     
     def get_scheduled_content_by_draft_id(self, draft_id):
+        """DEPRECATED: Now returns content_draft directly since tables are unified"""
         self.call_log.append(('get_scheduled_content_by_draft_id', draft_id))
-        for content in self.scheduled_content.values():
-            if content.get('content_draft_id') == draft_id:
-                return MockScheduledContent(content)
+        if draft_id in self.content_drafts:
+            draft_data = self.content_drafts[draft_id]
+            if draft_data.get('status') == 'scheduled':
+                return MockScheduledContent(draft_data)
         return None
     
     def update_content_draft(self, content_id, updates):
@@ -55,9 +70,11 @@ class MockDataFlowManager:
         return False
     
     def update_scheduled_content(self, scheduled_id, updates):
+        """DEPRECATED: Now updates content_drafts directly since scheduled_id == content_draft_id"""
         self.call_log.append(('update_scheduled_content', scheduled_id, updates))
-        if scheduled_id in self.scheduled_content:
-            self.scheduled_content[scheduled_id].update(updates)
+        # scheduled_id is now the same as content_draft_id
+        if scheduled_id in self.content_drafts:
+            self.content_drafts[scheduled_id].update(updates)
             return True
         return False
     
@@ -188,16 +205,36 @@ class MockScheduledContent:
     """Mock scheduled content object"""
     
     def __init__(self, data):
+        # Unified approach: scheduled_id == content_draft_id
         self.id = data.get('id', str(uuid.uuid4()))
-        self.content_draft_id = data['content_draft_id']
+        if 'content_draft_id' in data:
+            self.content_draft_id = data['content_draft_id']
+            self.id = self.content_draft_id  # Unified tables
+        else:
+            self.content_draft_id = self.id
+            
         self.founder_id = data['founder_id']
         self.scheduled_time = data['scheduled_time']
+        self.scheduled_post_time = self.scheduled_time  # DB field name
         self.status = data.get('status', PublishStatus.SCHEDULED.value)
         self.retry_count = data.get('retry_count', 0)
         self.max_retries = data.get('max_retries', 3)
         self.posted_at = data.get('posted_at')
         self.posted_tweet_id = data.get('posted_tweet_id')
         self.error_info = data.get('error_info')
+        
+        # Additional fields from unified table
+        self.content_type = data.get('content_type', 'tweet')
+        self.generated_text = data.get('generated_text', 'Test content')
+        self.platform = data.get('platform', 'twitter')
+        self.priority = data.get('priority', 5)
+        self.created_at = data.get('created_at', datetime.utcnow())
+        self.updated_at = data.get('updated_at', datetime.utcnow())
+        
+    @property
+    def final_text(self):
+        """Get final text for compatibility"""
+        return getattr(self, 'edited_text', None) or self.generated_text
 
 # Fixtures
 @pytest.fixture
@@ -320,7 +357,12 @@ def create_content_drafts(mock_data_flow_manager, user_id, count=5):
 
 def create_scheduled_content(mock_data_flow_manager, user_id, draft_id, 
                            scheduled_time=None, status=PublishStatus.SCHEDULED):
-    """Create scheduled content for testing"""
+    """
+    Create scheduled content for testing
+    
+    Note: Since scheduled_content table is unified with content_drafts,
+    this now updates the existing content draft with scheduling information.
+    """
     if not scheduled_time:
         scheduled_time = datetime.utcnow() + timedelta(hours=1)
     
@@ -329,11 +371,14 @@ def create_scheduled_content(mock_data_flow_manager, user_id, draft_id,
         'founder_id': user_id,
         'scheduled_time': scheduled_time,
         'status': status.value,
-        'retry_count': 0
+        'retry_count': 0,
+        'platform': 'twitter',
+        'priority': 5
     }
     
+    # This now updates the content draft instead of creating separate scheduled content
     scheduled_id = mock_data_flow_manager.create_scheduled_content(scheduled_data)
-    return scheduled_id
+    return scheduled_id  # Returns content_draft_id since tables are unified
 
 async def wait_for_condition(condition_func, timeout=5.0, interval=0.1):
     """Wait for a condition to become true"""
