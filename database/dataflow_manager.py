@@ -30,7 +30,7 @@ class DataFlowManager:
     Manages data flow between modules according to DFD specifications
     Implements the data flow patterns described in section 2.4.2
     """
-    
+
     def __init__(self, db_session: Session):
         self.db_session = db_session
         # OAuth code verifier 存储已迁移到 UserProfileService

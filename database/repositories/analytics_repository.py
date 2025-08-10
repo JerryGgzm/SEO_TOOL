@@ -1,5 +1,4 @@
 from datetime import datetime, timedelta, timezone
-from datetime import datetime, timedelta, UTC
 from sqlalchemy import func, and_, or_
 from typing import Dict, List, Optional, Tuple, Any
 from database.models import PostAnalytic
@@ -73,7 +72,7 @@ class AnalyticsRepository(BaseRepository):
                                     days: int = 30) -> Dict[str, Any]:
         """Get analytics summary for a founder"""
         try:
-            since_date = datetime.now(UTC) - timedelta(days=days)
+            since_date = datetime.now(timezone.utc) - timedelta(days=days)
             
             # Get analytics data
             analytics = self.db_session.query(PostAnalytic).filter(
@@ -135,7 +134,7 @@ class AnalyticsRepository(BaseRepository):
     def get_engagement_trends(self, founder_id: str, days: int = 30) -> List[Dict[str, Any]]:
         """Get daily engagement trends"""
         try:
-            since_date = datetime.now(UTC) - timedelta(days=days)
+            since_date = datetime.now(timezone.utc) - timedelta(days=days)
             
             # Query daily aggregations
             daily_stats = self.db_session.query(
