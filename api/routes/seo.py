@@ -155,52 +155,7 @@ async def get_seo_recommendations(
             detail="SEO recommendations generation failed"
         )
 
-@router.get("/analytics/{founder_id}")
-async def get_seo_analytics(
-    founder_id: str = Path(..., description="Founder ID"),
-    days: int = Query(default=30, ge=1, le=90, description="Analysis period in days"),
-    current_user: User = Depends(get_current_user),
-    service: SEOService = Depends(get_seo_service)
-):
-    """
-    Get comprehensive SEO analytics and performance metrics
-    
-    Returns detailed analytics including:
-    - Optimization performance trends
-    - Hashtag effectiveness
-    - Keyword performance
-    - LLM enhancement impact
-    """
-    try:
-        # Validate user access
-        if current_user.id != founder_id and not current_user.is_admin:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
-        
-        # Get SEO analytics
-        analytics = service.get_seo_analytics_summary(founder_id, days)
-        
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content={
-                "message": "SEO analytics retrieved successfully",
-                "founder_id": founder_id,
-                "period_days": days,
-                "analytics": analytics,
-                "generated_at": datetime.utcnow().isoformat()
-            }
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"SEO analytics retrieval failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="SEO analytics retrieval failed"
-        )
+
 
 @router.get("/hashtags/trending")
 async def get_trending_hashtags(

@@ -585,58 +585,7 @@ async def get_queue_information(
             detail="Failed to retrieve queue information"
         )
 
-@router.get("/analytics")
-async def get_publishing_analytics(
-    user_id: str = Query(..., description="User ID"),
-    days: int = Query(30, ge=1, le=90, description="Analysis period in days"),
-    current_user: User = Depends(get_current_user),
-    service: SchedulingPostingService = Depends(get_scheduling_service)
-):
-    """
-    Get publishing analytics for a user
-    
-    Returns comprehensive analytics about publishing performance,
-    success rates, timing, and error patterns.
-    """
-    try:
-        # Validate user access
-        if current_user.id != user_id and not current_user.is_admin:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied"
-            )
-        
-        # Get publishing analytics
-        analytics = await service.get_publishing_analytics(user_id, days)
-        
-        return JSONResponse(
-            status_code=status.HTTP_200_OK,
-            content={
-                "message": "Publishing analytics retrieved successfully",
-                "user_id": user_id,
-                "period_days": days,
-                "analytics": {
-                    "total_scheduled": analytics.total_scheduled,
-                    "total_published": analytics.total_published,
-                    "total_failed": analytics.total_failed,
-                    "success_rate": analytics.success_rate,
-                    "avg_publish_delay_minutes": analytics.avg_publish_delay_minutes,
-                    "most_common_errors": analytics.most_common_errors,
-                    "publishing_times_distribution": analytics.publishing_times_distribution,
-                    "platform_breakdown": analytics.platform_breakdown
-                },
-                "generated_at": datetime.utcnow().isoformat()
-            }
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to get publishing analytics: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to retrieve publishing analytics"
-        )
+
 
 @router.post("/queue/process")
 async def trigger_queue_processing(
