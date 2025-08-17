@@ -10,7 +10,6 @@ from .repositories.founder_repository import FounderRepository
 from .repositories.product_repository import ProductRepository
 from .repositories.trend_repository import TrendRepository
 from .repositories.content_repository import ContentRepository
-from .repositories.analytics_repository import AnalyticsRepository
 from .dataflow_manager import DataFlowManager
 from .models import (
     Base, Founder, Product, AnalyzedTrend, TwitterCredential, 
@@ -175,7 +174,6 @@ __all__ = [
     'ProductRepository', 
     'TrendRepository',
     'ContentRepository',
-    'AnalyticsRepository',
     'DataFlowManager',
     'Base',
     'Founder',

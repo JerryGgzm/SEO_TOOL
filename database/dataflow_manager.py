@@ -17,7 +17,7 @@ from requests.auth import HTTPBasicAuth
 
 from .repositories import (
     FounderRepository, ProductRepository, TrendRepository, 
-    ContentRepository, AnalyticsRepository, AutomationRepository
+    ContentRepository, AutomationRepository
 )
 from .models import *
 
@@ -40,7 +40,6 @@ class DataFlowManager:
         self.product_repo = ProductRepository(db_session)
         self.trend_repo = TrendRepository(db_session)
         self.content_repo = ContentRepository(db_session)
-        self.analytics_repo = AnalyticsRepository(db_session)
         self.automation_repo = AutomationRepository(db_session)
     
     # ====================
@@ -665,137 +664,6 @@ class DataFlowManager:
         except Exception as e:
             logger.error(f"Failed to record publication error: {e}")
             return False
-    
-    def store_post_analytics(self, analytics_data: Dict[str, Any]) -> bool:
-        """
-        Store post analytics data
-        
-        Flow: TwitterAPI -> AnalyticsModule -> Database (post_analytics table)
-        
-        Args:
-            analytics_data: Post performance metrics
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            analytics = self.analytics_repo.create_or_update_analytics(
-                posted_tweet_id=analytics_data['posted_tweet_id'],
-                founder_id=analytics_data['founder_id'],
-                impressions=analytics_data.get('impressions', 0),
-                likes=analytics_data.get('likes', 0),
-                retweets=analytics_data.get('retweets', 0),
-                replies=analytics_data.get('replies', 0),
-                quote_tweets=analytics_data.get('quote_tweets', 0),
-                link_clicks=analytics_data.get('link_clicks', 0),
-                profile_visits_from_tweet=analytics_data.get('profile_visits_from_tweet', 0),
-                posted_at=analytics_data.get('posted_at')
-            )
-            
-            if analytics:
-                logger.info(f"Analytics stored for tweet {analytics_data['posted_tweet_id']}")
-                return True
-            
-            return False
-            
-        except Exception as e:
-            logger.error(f"Failed to store analytics: {e}")
-            return False
-    
-    def get_analytics_dashboard_data(self, founder_id: str, 
-                                   days: int = 30) -> Dict[str, Any]:
-        """
-        Get analytics dashboard data
-        
-        Flow: UI -> AnalyticsModule -> Database -> Return dashboard data
-        
-        Args:
-            founder_id: Founder's ID
-            days: Number of days to analyze
-            
-        Returns:
-            Dashboard data dictionary
-        """
-        try:
-            # Get summary statistics
-            summary = self.analytics_repo.get_founder_analytics_summary(founder_id, days)
-            
-            # Get engagement trends
-            trends = self.analytics_repo.get_engagement_trends(founder_id, days)
-            
-            # Get recent trends analysis
-            recent_trends = self.trend_repo.get_trends_by_founder(founder_id, limit=10)
-            micro_trends = self.trend_repo.get_micro_trends(founder_id, limit=5)
-            
-            # Get content performance by trend
-            content_by_trend = self.db_session.query(
-                GeneratedContentDraft.analyzed_trend_id,
-                AnalyzedTrend.topic_name,
-                func.count(GeneratedContentDraft.id).label('content_count'),
-                func.avg(PostAnalytic.engagement_rate).label('avg_engagement')
-            ).join(
-                PostAnalytic, GeneratedContentDraft.posted_tweet_id == PostAnalytic.posted_tweet_id
-            ).join(
-                AnalyzedTrend, GeneratedContentDraft.analyzed_trend_id == AnalyzedTrend.id
-            ).filter(
-                GeneratedContentDraft.founder_id == founder_id,
-                GeneratedContentDraft.status == 'posted'
-            ).group_by(
-                GeneratedContentDraft.analyzed_trend_id,
-                AnalyzedTrend.topic_name
-            ).limit(10).all()
-            
-            print("1")
-            # Get automation rules performance
-            automation_rules = self.automation_repo.get_active_rules(founder_id)
-            
-            # Get content status distribution
-            content_status_dist = self.db_session.query(
-                GeneratedContentDraft.status,
-                func.count(GeneratedContentDraft.id).label('count')
-            ).filter(
-                GeneratedContentDraft.founder_id == founder_id,
-                GeneratedContentDraft.created_at >= datetime.now(UTC) - timedelta(days=days)
-            ).group_by(GeneratedContentDraft.status).all()
-            
-            print("2")
-            # Average engagement rate
-            avg_engagement = self.db_session.query(
-                func.avg(PostAnalytic.engagement_rate)
-            ).scalar() or 0
-            print("3")
-            # Twitter credentials status
-            twitter_connected = self.db_session.query(TwitterCredential).count()
-            expired_tokens = self.db_session.query(TwitterCredential).filter(
-                TwitterCredential.token_expires_at < datetime.now(UTC)
-            ).count()
-            
-            return {
-                'summary': summary,
-                'engagement_trends': trends,
-                'recent_trends_count': len(recent_trends),
-                'micro_trends_count': len(micro_trends),
-                'content_by_trend': [
-                    {
-                        'trend_topic': item.topic_name,
-                        'content_count': item.content_count,
-                        'avg_engagement_rate': round(float(item.avg_engagement or 0), 2)
-                    }
-                    for item in content_by_trend
-                ],
-                'automation_rules_count': len(automation_rules),
-                'active_automation_rules': sum(1 for rule in automation_rules if rule.is_active),
-                'content_status_distribution': {
-                    status: count for status, count in content_status_dist
-                },
-                'period_days': days,
-                'avg_engagement_rate': round(float(avg_engagement), 2)
-            }
-            
-        except Exception as e:
-            logger.error(f"Failed to get dashboard data: {e}")
-            return {}
-    
     # ====================
     # Automation Rules Flow
     # ====================
@@ -2198,17 +2066,9 @@ class DataFlowManagerSEOExtensions:
             
             # You can use your existing analytics or logging mechanism
             # For example, if you have an analytics_events table:
-            try:
-                # Method 1: Use existing analytics infrastructure
-                if hasattr(self, 'analytics_repo') and self.analytics_repo:
-                    success = self.analytics_repo.create(**analytics_record)
-                    if success:
-                        self.db_session.commit()
-                        logger.info(f"SEO optimization result stored for founder {founder_id}")
-                        return True
-                
+            try:                
                 # Method 2: Store directly using raw SQL if needed
-                elif hasattr(self, 'db_session'):
+                if hasattr(self, 'db_session'):
                     # Create a simple table structure if it doesn't exist
                     self.db_session.execute(text("""
                         CREATE TABLE IF NOT EXISTS seo_optimization_results (
@@ -2337,46 +2197,6 @@ class DataFlowManagerSEOExtensions:
             except Exception as db_error:
                 logger.warning(f"Database query failed, trying alternative methods: {db_error}")
             
-            # Method 2: Query from analytics events if SEO data is stored there
-            try:
-                if hasattr(self, 'analytics_repo') and self.analytics_repo:
-                    analytics_events = self.analytics_repo.get_events_by_founder(
-                        founder_id=founder_id,
-                        event_type='seo_optimization',
-                        since_date=since_date,
-                        limit=100
-                    )
-                    
-                    for event in analytics_events:
-                        try:
-                            event_data = json.loads(event.event_data) if isinstance(event.event_data, str) else event.event_data
-                            seo_history.append({
-                                'id': event.id,
-                                'founder_id': event_data.get('founder_id', founder_id),
-                                'content_draft_id': event_data.get('content_draft_id'),
-                                'optimization_timestamp': event_data.get('optimization_timestamp'),
-                                'seo_quality_score': event_data.get('seo_quality_score', 0.0),
-                                'overall_quality_score': event_data.get('overall_quality_score', 0.0),
-                                'keywords_used': event_data.get('keywords_used', []),
-                                'hashtags_suggested': event_data.get('hashtags_suggested', []),
-                                'content_type': event_data.get('content_type', 'tweet'),
-                                'optimization_method': event_data.get('optimization_method', 'unknown'),
-                                'content_length': event_data.get('content_length', 0),
-                                'trend_id': event_data.get('trend_id'),
-                                'metadata': event_data.get('metadata', {}),
-                                'created_at': event.timestamp.isoformat() if hasattr(event, 'timestamp') else None
-                            })
-                        except Exception as parse_error:
-                            logger.warning(f"Failed to parse analytics event: {parse_error}")
-                            continue
-                    
-                    if seo_history:
-                        logger.info(f"Retrieved {len(seo_history)} SEO records from analytics for founder {founder_id}")
-                        return seo_history
-                        
-            except Exception as analytics_error:
-                logger.warning(f"Analytics query failed: {analytics_error}")
-            
             # Method 3: Check in-memory cache as fallback
             if hasattr(self, '_seo_optimization_cache'):
                 cached_records = [
@@ -2388,12 +2208,7 @@ class DataFlowManagerSEOExtensions:
                 if cached_records:
                     logger.info(f"Retrieved {len(cached_records)} SEO records from cache for founder {founder_id}")
                     return cached_records
-            
-            # Method 4: Generate sample data for demonstration (remove in production)
-            if not seo_history:
-                logger.info(f"No SEO history found for founder {founder_id}, generating sample data")
-                seo_history = self._generate_sample_seo_history(founder_id, days)
-            
+                        
             return seo_history
             
         except Exception as e:

@@ -7,7 +7,6 @@ from .founder_repository import FounderRepository
 from .product_repository import ProductRepository
 from .trend_repository import TrendRepository
 from .content_repository import ContentRepository
-from .analytics_repository import AnalyticsRepository
 from .automation_repository import AutomationRepository
 
 __all__ = [
@@ -16,6 +15,5 @@ __all__ = [
     'ProductRepository',
     'TrendRepository',
     'ContentRepository',
-    'AnalyticsRepository',
     'AutomationRepository'
 ] 
