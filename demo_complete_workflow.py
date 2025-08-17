@@ -1169,7 +1169,7 @@ class CompleteWorkflowDemo:
             ("检查服务器", self.check_server_status),
             ("用户注册/登录", self.step_1_user_registration),
             ("Twitter OAuth", self.step_2_twitter_oauth),
-            # ("趋势分析", self.step_3_trend_analysis),
+            ("趋势分析", self.step_3_trend_analysis),
             # ("内容生成", self.step_4_content_generation),
             # ("SEO优化", self.step_5_seo_optimization),
             # ("审核优化", self.step_6_review_optimization),

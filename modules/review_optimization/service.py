@@ -13,7 +13,7 @@ import json
 from database import DataFlowManager
 from modules.content_generation.service import ContentGenerationService
 from modules.content_generation.models import ContentGenerationRequest, ContentType
-from modules.analytics.collector import AnalyticsCollector
+
 
 from .models import (
     ContentDraftReview, ReviewDecision, DraftStatus, ContentPriority,
@@ -33,11 +33,11 @@ class ReviewOptimizationService:
     
     def __init__(self, data_flow_manager: DataFlowManager,
                  content_generation_service: ContentGenerationService = None,
-                 analytics_collector: AnalyticsCollector = None):
+                 analytics_collector = None):
         
         self.data_flow_manager = data_flow_manager
         self.content_generation_service = content_generation_service
-        self.analytics_collector = analytics_collector
+
         
         # Database adapter for converting between service and database models
         self.db_adapter = ReviewOptimizationDatabaseAdapter()
@@ -801,57 +801,11 @@ class ReviewOptimizationService:
         except ValueError:
             return False
     
-    async def _record_review_analytics(self, founder_id: str, decision: ReviewDecision, draft_id: str) -> None:
-        """Record review analytics"""
-        try:
-            if self.analytics_collector:
-                analytics_data = {
-                    'event_type': 'content_review',
-                    'founder_id': founder_id,
-                    'draft_id': draft_id,
-                    'decision': decision.value,
-                    'timestamp': datetime.utcnow().isoformat()
-                }
-                
-                await self.analytics_collector.record_event(analytics_data)
-        except Exception as e:
-            logger.warning(f"Failed to record review analytics: {e}")
+
     
-    async def _record_batch_review_analytics(self, founder_id: str, results: Dict[str, bool]) -> None:
-        """Record batch review analytics"""
-        try:
-            if self.analytics_collector:
-                successful_reviews = sum(1 for success in results.values() if success)
-                total_reviews = len(results)
-                
-                analytics_data = {
-                    'event_type': 'batch_content_review',
-                    'founder_id': founder_id,
-                    'total_reviews': total_reviews,
-                    'successful_reviews': successful_reviews,
-                    'success_rate': successful_reviews / max(total_reviews, 1),
-                    'timestamp': datetime.utcnow().isoformat()
-                }
-                
-                await self.analytics_collector.record_event(analytics_data)
-        except Exception as e:
-            logger.warning(f"Failed to record batch review analytics: {e}")
+
     
-    async def _record_status_change_analytics(self, founder_id: str, draft_id: str, new_status: DraftStatus) -> None:
-        """Record status change analytics"""
-        try:
-            if self.analytics_collector:
-                analytics_data = {
-                    'event_type': 'draft_status_change',
-                    'founder_id': founder_id,
-                    'draft_id': draft_id,
-                    'new_status': new_status.value,
-                    'timestamp': datetime.utcnow().isoformat()
-                }
-                
-                await self.analytics_collector.record_event(analytics_data)
-        except Exception as e:
-            logger.warning(f"Failed to record status change analytics: {e}")
+
     
     async def _add_to_scheduling_queue(self, draft_id: str, schedule_time: datetime) -> None:
         """Add approved content to scheduling queue"""

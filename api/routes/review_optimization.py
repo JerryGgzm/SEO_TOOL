@@ -10,7 +10,7 @@ import logging
 
 from database import get_data_flow_manager, DataFlowManager
 from modules.content_generation.service import ContentGenerationService
-from modules.analytics.collector import AnalyticsCollector
+
 from api.middleware import get_current_user, User
 
 from modules.review_optimization.service import ReviewOptimizationService
@@ -45,17 +45,11 @@ async def get_review_service(
         except Exception as e:
             logger.warning(f"Content generation service not available: {e}")
         
-        # Initialize analytics collector (if available)
-        analytics_collector = None
-        try:
-            analytics_collector = AnalyticsCollector()
-        except Exception as e:
-            logger.warning(f"Analytics collector not available: {e}")
-        
+        # ...existing code...
         return ReviewOptimizationService(
             data_flow_manager=data_flow_manager,
             content_generation_service=content_generation_service,
-            analytics_collector=analytics_collector
+            analytics_collector=None
         )
     except Exception as e:
         logger.error(f"Failed to create review service: {e}")
