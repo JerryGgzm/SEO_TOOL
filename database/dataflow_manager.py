@@ -1997,6 +1997,63 @@ class DataFlowManager:
         except Exception as e:
             logger.error(f"Failed to update user scheduling rule: {e}")
             return False
+        
+    def delete_content_draft(self, draft_id: str) -> bool:
+        """
+        删除内容草稿
+        
+        Args:
+            draft_id: 草稿ID
+            
+        Returns:
+            是否删除成功
+        """
+        try:
+            # 使用内容仓库删除草稿
+            success = self.content_repo.delete(draft_id)
+            if success:
+                logger.info(f"Successfully deleted content draft {draft_id}")
+            else:
+                logger.warning(f"Content draft {draft_id} not found or already deleted")
+            return success
+            
+        except Exception as e:
+            logger.error(f"Failed to delete content draft {draft_id}: {e}")
+            return False
+    
+    def delete_scheduled_content(self, scheduled_content_id: str) -> bool:
+        """
+        删除调度内容
+        
+        Args:
+            scheduled_content_id: 调度内容ID
+            
+        Returns:
+            是否删除成功
+        """
+        try:
+            # 从调度内容表中删除
+            result = self.db_session.execute(text("""
+                DELETE FROM scheduled_content 
+                WHERE id = :scheduled_content_id
+            """), {
+                'scheduled_content_id': scheduled_content_id
+            })
+            
+            self.db_session.commit()
+            deleted_count = result.rowcount
+            
+            if deleted_count > 0:
+                logger.info(f"Successfully deleted scheduled content {scheduled_content_id}")
+                return True
+            else:
+                logger.warning(f"Scheduled content {scheduled_content_id} not found or already deleted")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to delete scheduled content {scheduled_content_id}: {e}")
+            self.db_session.rollback()
+            return False
 
 
 class DataFlowManagerSEOExtensions:

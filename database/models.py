@@ -290,7 +290,7 @@ class GeneratedContentDraft(Base):
     
     # Error handling fields
     retry_count = Column(Integer, default=0, comment="Current retry count")
-    max_retries = Column(Integer, default=3, comment="Maximum retry attempts")
+    max_retries = Column(Integer, default=1, comment="Maximum retry attempts")
     error_message = Column(Text, comment="Error message if failed")
     error_code = Column(String(50), comment="Error code if failed")
     

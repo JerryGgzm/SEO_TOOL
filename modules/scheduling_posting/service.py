@@ -766,6 +766,7 @@ class SchedulingPostingService:
                             'posted_tweet_id': tweet_id
                         }
                     )
+                    logger.info(f"Content posted to twitter successfully: {tweet_id}")
                     
                     # Record analytics
                     await self._record_publishing_analytics(user_id, 'posted', publish_request.content_id)
@@ -785,6 +786,12 @@ class SchedulingPostingService:
                     
             except TwitterAPIError as e:
                 logger.error(f"Twitter API error: {e}")
+                # # 发布失败时清理草稿和相关数据
+                # try:
+                #     await self._cleanup_failed_draft(user_id, content_draft.id)
+                #     logger.info(f"Cleaned up failed draft {content_draft.id} for user {user_id}")
+                # except Exception as cleanup_error:
+                    # logger.error(f"Failed to cleanup failed draft {content_draft.id}: {cleanup_error}")
                 return PublishResponse(
                     success=False,
                     message=f"Twitter API error: {str(e)}",
@@ -793,6 +800,14 @@ class SchedulingPostingService:
                 
         except Exception as e:
             logger.error(f"Failed to publish to Twitter: {e}")
+            # # 发布失败时也尝试清理草稿
+            # try:
+            #     if 'content_draft' in locals():
+            #         await self._cleanup_failed_draft(user_id, content_draft.id)
+            #         logger.info(f"Cleaned up failed draft {content_draft.id} after general error")
+            # except Exception as cleanup_error:
+            #     logger.error(f"Failed to cleanup draft after general error: {cleanup_error}")
+            
             return PublishResponse(
                 success=False,
                 message=f"Publishing failed: {str(e)}",
@@ -844,6 +859,7 @@ class SchedulingPostingService:
             logger.error(f"Failed to process queue item: {e}")
             return {'success': False, 'error': str(e)}
     
+
     async def _get_user_scheduling_preferences(self, user_id: str) -> SchedulingPreferences:
         """Get user's scheduling preferences"""
         try:
@@ -959,3 +975,39 @@ class SchedulingPostingService:
                 await self.analytics_collector.record_event(analytics_data)
         except Exception as e:
             logger.warning(f"Failed to record publishing analytics: {e}")
+
+    async def _cleanup_failed_draft(self, user_id: str, draft_id: str) -> None:
+        """
+        清理发布失败的草稿和相关数据
+        
+        Args:
+            user_id: 用户ID
+            draft_id: 草稿ID
+        """
+        try:
+            logger.info(f"Starting cleanup for failed draft {draft_id}")
+            
+            # 1. 删除相关的调度内容
+            scheduled_content = self.data_flow_manager.get_scheduled_content_by_draft_id(draft_id)
+            if scheduled_content:
+                try:
+                    self.data_flow_manager.delete_scheduled_content(str(scheduled_content.id))
+                    logger.info(f"Deleted scheduled content {scheduled_content.id} for failed draft {draft_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete scheduled content for draft {draft_id}: {e}")
+            
+            # 2. 删除内容草稿
+            try:
+                self.data_flow_manager.delete_content_draft(draft_id)
+                logger.info(f"Deleted content draft {draft_id}")
+            except Exception as e:
+                logger.warning(f"Failed to delete content draft {draft_id}: {e}")
+            
+            # 3. 记录清理事件到分析系统
+            await self._record_publishing_analytics(user_id, 'draft_cleanup', draft_id)
+            
+            logger.info(f"Successfully cleaned up failed draft {draft_id}")
+            
+        except Exception as e:
+            logger.error(f"Error during cleanup of failed draft {draft_id}: {e}")
+            raise
